@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Focus Time!</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap');
+
+        body {
+            text-align: center;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 1rem;
+            font-family: 'Fredoka', 'Comic Sans MS', cursive, sans-serif;
+        }
+
+        .container {
+            max-width: 500px;
+            padding: 2rem 1rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 1rem;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #fbbf24 0%, #f87171 50%, #ef4444 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            text-shadow: 0 0 40px rgba(251, 191, 36, 0.3);
+            font-family: 'Fredoka', 'Comic Sans MS', cursive, sans-serif;
+        }
+
+        p {
+            font-size: 1.2rem;
+            color: var(--text-primary);
+            margin: 0;
+            line-height: 1.6;
+            max-width: 600px;
+            white-space: nowrap;
+            font-family: 'Fredoka', 'Comic Sans MS', cursive, sans-serif;
+            font-weight: 500;
+        }
+
+        img.mascot {
+            width: 200px;
+            height: auto;
+            margin-bottom: 0.5rem;
+            animation: float 3s ease-in-out infinite;
+            filter: drop-shadow(0 10px 30px rgba(99, 102, 241, 0.3));
+            background: transparent;
+            display: block;
+        }
+
+        @keyframes float {
+            0% {
+                transform: translateY(0px) scale(1);
+            }
+
+            50% {
+                transform: translateY(-10px) scale(1.02);
+            }
+
+            100% {
+                transform: translateY(0px) scale(1);
+            }
+        }
+
+        .mode-badge {
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(139, 92, 246, 0.2) 100%);
+            color: #a78bfa;
+            padding: 0.25rem 0.75rem;
+            border-radius: 15px;
+            font-weight: 700;
+            font-size: 1.2rem;
+            display: inline-block;
+            border: 2px solid rgba(167, 139, 250, 0.3);
+            box-shadow: 0 4px 16px rgba(99, 102, 241, 0.2);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-family: 'Fredoka', 'Comic Sans MS', cursive, sans-serif;
+        }
+
+        .mode-container {
+            margin: 0.5rem 0;
+            font-size: 1.2rem;
+            color: var(--text-primary);
+            font-family: 'Fredoka', 'Comic Sans MS', cursive, sans-serif;
+            font-weight: 500;
+            white-space: nowrap;
+            max-width: 600px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <img src="/icons/mascot.png" alt="Focus Owl" class="mascot">
+        <h1>Focus Time!</h1>
+
+        <p>Why are you visiting blocked sites? Get back to work!</p>
+
+        <p>Uh oh! This site is taking a nap right now. You are currently in <span class="mode-badge" id="modeName">Loading...</span> mode.</p>
+
+        <!-- Only shown when a redirect chain caused the block -->
+        <div id="redirectNotice" style="display:none; margin-top: 1rem; padding: 0.85rem 1.25rem; background: rgba(251,191,36,0.12); border: 1.5px solid rgba(251,191,36,0.4); border-radius: 12px; max-width: 440px; text-align: left;">
+            <p style="font-size: 0.95rem; white-space: normal; margin-bottom: 0.4rem; color: var(--text-primary);">
+                🔗 You were trying to reach <strong id="intendedDomain" style="color:#fbbf24;"></strong>, but it redirected through <strong id="blockedDomain" style="color:#f87171;"></strong> which isn't in the allowlist.
+            </p>
+            <p style="font-size: 0.85rem; white-space: normal; margin: 0; color: var(--text-secondary);">
+                Ask a parent to add <strong id="blockedDomainRepeat"></strong> to the allowlist to fix this.
+            </p>
+        </div>
+    </div>
+
+    <script src="utils.js"></script>
+    <script>
+        // Inline getCurrentMode function as backup
+        function getCurrentModeInline(schedule) {
+            const now = new Date();
+            const currentMinutes = now.getHours() * 60 + now.getMinutes();
+            const times = Object.keys(schedule).sort();
+            if (times.length === 0) return 'free';
+            
+            const timeToMin = (t) => {
+                const [h, m] = t.split(':').map(Number);
+                return h * 60 + m;
+            };
+            
+            let activeTime = null;
+            for (let i = 0; i < times.length; i++) {
+                if (currentMinutes >= timeToMin(times[i])) {
+                    activeTime = times[i];
+                } else {
+                    break;
+                }
+            }
+            
+            if (activeTime === null) {
+                activeTime = times[times.length - 1];
+            }
+            
+            return schedule[activeTime] || 'free';
+        }
+        
+        function getDomain(url) {
+            try { return new URL(url).hostname.replace('www.', ''); } catch (e) { return url; }
+        }
+
+        // Simple, direct approach - calculate mode immediately
+        (async function() {
+            const modeElement = document.getElementById('modeName');
+            if (!modeElement) return;
+
+            try {
+                // Get config from storage
+                const data = await chrome.storage.local.get(['config', 'currentMode']);
+
+                let currentMode = null;
+
+                // Try to use stored currentMode first (fastest)
+                if (data.currentMode) {
+                    currentMode = data.currentMode;
+                }
+                // Otherwise calculate from config
+                else if (data.config && data.config.schedule) {
+                    // Try using getCurrentMode from utils.js, fallback to inline version
+                    if (typeof getCurrentMode !== 'undefined') {
+                        currentMode = getCurrentMode(data.config.schedule);
+                    } else {
+                        currentMode = getCurrentModeInline(data.config.schedule);
+                    }
+                }
+                // Fallback to default
+                else {
+                    const defaultSchedule = {
+                        "07:00": "free",
+                        "15:00": "study",
+                        "18:00": "free",
+                        "20:00": "sleep"
+                    };
+                    currentMode = getCurrentModeInline(defaultSchedule);
+                }
+
+                if (currentMode) {
+                    const modeDisplay = currentMode.charAt(0).toUpperCase() + currentMode.slice(1);
+                    modeElement.textContent = modeDisplay;
+                } else {
+                    modeElement.textContent = 'Study';
+                }
+            } catch (error) {
+                console.error('Error loading mode:', error);
+                modeElement.textContent = 'Study';
+            }
+        })();
+
+        // Show redirect context only when the blocked URL differs from what the user intended
+        (async function() {
+            try {
+                const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+                if (!tabs || !tabs.length) return;
+                const tabId = tabs[0].id;
+
+                const sessionData = await chrome.storage.session.get([`blockedNav_${tabId}`]);
+                const nav = sessionData[`blockedNav_${tabId}`];
+                if (!nav) return;
+
+                const intendedDomain = getDomain(nav.intendedUrl);
+                const blockedDomain  = getDomain(nav.blockedUrl);
+
+                // Only show the notice when the domains actually differ
+                if (intendedDomain && blockedDomain && intendedDomain !== blockedDomain) {
+                    document.getElementById('intendedDomain').textContent    = intendedDomain;
+                    document.getElementById('blockedDomain').textContent     = blockedDomain;
+                    document.getElementById('blockedDomainRepeat').textContent = blockedDomain;
+                    document.getElementById('redirectNotice').style.display  = 'block';
+                }
+            } catch (e) {
+                // storage.session not available in older Chrome — silently ignore
+            }
+        })();
+    </script>
+</body>
+
+</html>

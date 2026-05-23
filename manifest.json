@@ -1,0 +1,37 @@
+{
+    "manifest_version": 3,
+    "name": "Duofocus",
+    "version": "1.0.0",
+    "description": "A local-only, time-based site blocker to help you focus.",
+    "permissions": [
+        "storage",
+        "declarativeNetRequest",
+        "alarms",
+        "tabs",
+        "webNavigation"
+    ],
+    "host_permissions": [
+        "<all_urls>"
+    ],
+    "background": {
+        "service_worker": "service_worker.js"
+    },
+    "action": {
+        "default_title": "Duofocus"
+    },
+    "options_page": "options.html",
+    "icons": {
+        "16": "icons/icon16.png",
+        "48": "icons/icon48.png",
+        "128": "icons/icon128.png"
+    },
+    "declarative_net_request": {
+        "rule_resources": [
+            {
+                "id": "block_all",
+                "enabled": true,
+                "path": "rules.json"
+            }
+        ]
+    }
+}

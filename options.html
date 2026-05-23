@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Duofocus Settings</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="toggle.css">
+</head>
+
+<body>
+    <!-- Lock Screen -->
+    <div id="lockScreen" class="lock-screen">
+        <div class="lock-container">
+            <div style="text-align:center; margin-bottom: 1.5rem;">
+                <img src="icons/icon128.png" style="width: 64px; height: 64px; border-radius: 16px; box-shadow: 0 8px 32px rgba(99, 102, 241, 0.3);">
+                <h1 style="margin: 0.75rem 0 0.25rem 0; font-size: 1.75rem;">Duofocus</h1>
+            </div>
+            <h2 id="lockTitle">Unlock Settings</h2>
+            <p id="lockMessage" style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.9rem;">Enter parent password to unlock.</p>
+            <input type="password" id="passwordInput" placeholder="Enter your password">
+            <button id="unlockBtn" style="width: 100%; margin-top: 0.5rem;">Unlock</button>
+            <p id="lockError" class="error"></p>
+            <button id="resetPasswordBtn" class="danger" style="width: 100%; margin-top: 0.5rem; font-size: 0.85rem; padding: 0.5rem;">Reset Password (Clears All Settings)</button>
+        </div>
+    </div>
+
+    <!-- Main Settings Panel (Hidden by default) -->
+    <div id="settingsPanel" class="hidden">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <img src="icons/icon128.png" alt="Duofocus" class="sidebar-logo">
+                <h1 class="sidebar-title">Duofocus</h1>
+            </div>
+            <nav class="sidebar-nav">
+                <button class="nav-item active" data-section="usage">
+                    <span>Usage</span>
+                </button>
+                <button class="nav-item" data-section="schedule">
+                    <span>Schedule</span>
+                </button>
+                <button class="nav-item" data-section="rules">
+                    <span>Rules</span>
+                </button>
+                <button class="nav-item" data-section="security">
+                    <span>Security</span>
+                </button>
+            </nav>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Usage Section -->
+            <section id="usage-section" class="content-section active">
+                <h2>Usage</h2>
+                <div class="section-content">
+                    <!-- Filter row -->
+                    <div class="usage-filters" style="margin-bottom: 1.5rem; padding: 1rem; background: var(--surface-elevated); border-radius: 8px; border: 1px solid var(--border-color);">
+                        <div style="display: flex; gap: 1.5rem; margin-bottom: 1rem;">
+                            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                                <input type="radio" name="usageFilter" id="usageFilterToday" value="today" checked>
+                                <span>Today</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                                <input type="radio" name="usageFilter" id="usageFilterRange" value="range">
+                                <span>Date range</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                                <input type="radio" name="usageFilter" id="usageFilterAll" value="all">
+                                <span>All time</span>
+                            </label>
+                        </div>
+                        <div id="usageDateSingleWrap" style="display: flex; align-items: center; gap: 0.75rem;">
+                            <label for="usageDateSingle" style="font-weight: 500;">Date:</label>
+                            <input type="date" id="usageDateSingle" style="width: auto;">
+                        </div>
+                        <div id="usageDateRangeWrap" style="display: none; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                            <label for="usageDateStart" style="font-weight: 500;">From:</label>
+                            <input type="date" id="usageDateStart" style="width: auto;">
+                            <label for="usageDateEnd" style="font-weight: 500; margin-left: 0.5rem;">To:</label>
+                            <input type="date" id="usageDateEnd" style="width: auto;">
+                        </div>
+                    </div>
+                    
+                    <div style="margin-bottom: 1.5rem;">
+                        <button id="clearUsageBtn" class="danger">Clear All Usage Data</button>
+                    </div>
+                    
+                    <div id="usageStats">
+                        <p style="color: var(--text-secondary);">Loading usage statistics...</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Schedule Section -->
+            <section id="schedule-section" class="content-section">
+                <h2>Schedule</h2>
+                <div class="section-content">
+                    <div class="add-row">
+                        <div>
+                            <label class="input-label">Time</label>
+                            <input type="time" id="newTime">
+                        </div>
+                        <div>
+                            <label class="input-label">Mode</label>
+                            <select id="newMode">
+                                <option value="study">Study</option>
+                                <option value="free">Free</option>
+                                <option value="sleep">Sleep</option>
+                            </select>
+                        </div>
+                        <button id="addScheduleBtn">Add</button>
+                    </div>
+
+                    <div id="scheduleEditor">
+                        <!-- Schedule items rendered here -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- Rules Section -->
+            <section id="rules-section" class="content-section">
+                <h2>Mode Rules</h2>
+                <div class="section-content">
+                    <div class="input-group">
+                        <label for="modeSelect" class="input-label">Select Mode to Edit:</label>
+                        <select id="modeSelect">
+                            <option value="study">Study</option>
+                            <option value="free">Free</option>
+                            <option value="sleep">Sleep</option>
+                        </select>
+                    </div>
+
+                    <div class="input-group">
+                        <label class="input-label">Strategy:</label>
+                        <div class="radio-group">
+                            <label class="radio-label">
+                                <input type="radio" name="modeType" value="allowlist">
+                                Allowlist Only (Block Everything Else)
+                            </label>
+                            <label class="radio-label">
+                                <input type="radio" name="modeType" value="blocklist">
+                                Blocklist (Allow Everything Else)
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="input-group">
+                        <label class="input-label" id="listLabel">Allowed Domains (one per line):</label>
+                        <textarea id="domainListInput" placeholder="example.com"></textarea>
+                    </div>
+
+                    <button id="saveRulesBtn">Save Rules for Mode</button>
+                </div>
+            </section>
+
+            <!-- Security Section -->
+            <section id="security-section" class="content-section">
+                <h2>Security</h2>
+                <div class="section-content">
+                    <div class="security-card">
+                        <div class="security-card-header">
+                            <div>
+                                <span class="security-title">Master Status</span>
+                                <span class="security-desc">Toggle to enable/disable protection.</span>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="masterToggle">
+                                <span class="slider round"></span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="security-card">
+                        <div class="security-card-header">
+                            <div>
+                                <span class="security-title">Password</span>
+                                <span class="security-desc">Change your parent password.</span>
+                            </div>
+                            <button id="changePasswordBtn" class="danger">Change Password</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="utils.js"></script>
+    <script src="options.js"></script>
+</body>
+
+</html>
