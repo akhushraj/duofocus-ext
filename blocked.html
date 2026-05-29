@@ -205,30 +205,68 @@
             }
         })();
 
-        // Show redirect context only when the blocked URL differs from what the user intended
+        // Handles three things:
+        // 1. Persist the intended URL in the hash so it survives a page refresh
+        // 2. Auto-navigate if the block has already been removed (e.g. parent just toggled it off)
+        // 3. Show the redirect-chain notice when the blocked domain differs from the intended one
         (async function() {
-            try {
-                const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-                if (!tabs || !tabs.length) return;
-                const tabId = tabs[0].id;
+            let intendedUrl = null;
+            let blockedUrl  = null;
 
-                const sessionData = await chrome.storage.session.get([`blockedNav_${tabId}`]);
-                const nav = sessionData[`blockedNav_${tabId}`];
-                if (!nav) return;
-
-                const intendedDomain = getDomain(nav.intendedUrl);
-                const blockedDomain  = getDomain(nav.blockedUrl);
-
-                // Only show the notice when the domains actually differ
-                if (intendedDomain && blockedDomain && intendedDomain !== blockedDomain) {
-                    document.getElementById('intendedDomain').textContent    = intendedDomain;
-                    document.getElementById('blockedDomain').textContent     = blockedDomain;
-                    document.getElementById('blockedDomainRepeat').textContent = blockedDomain;
-                    document.getElementById('redirectNotice').style.display  = 'block';
-                }
-            } catch (e) {
-                // storage.session not available in older Chrome — silently ignore
+            // --- Read intended URL: hash survives refresh, session storage is the first load ---
+            const hash = window.location.hash;
+            if (hash && hash.length > 1) {
+                try { intendedUrl = decodeURIComponent(hash.slice(1)); } catch (e) {}
             }
+
+            if (!intendedUrl) {
+                try {
+                    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+                    if (tabs && tabs.length) {
+                        const tabId = tabs[0].id;
+                        const sessionData = await chrome.storage.session.get([`blockedNav_${tabId}`]);
+                        const nav = sessionData[`blockedNav_${tabId}`];
+                        if (nav) {
+                            intendedUrl = nav.intendedUrl;
+                            blockedUrl  = nav.blockedUrl;
+                        }
+                    }
+                } catch (e) {
+                    // storage.session not available in older Chrome — silently ignore
+                }
+            }
+
+            if (!intendedUrl) return;
+
+            // --- Persist in hash so refresh retries the right URL ---
+            history.replaceState(null, '', `${window.location.pathname}#${encodeURIComponent(intendedUrl)}`);
+
+            // --- If the block is already gone, navigate immediately ---
+            if (!(await wouldBeBlocked(intendedUrl))) {
+                window.location.href = intendedUrl;
+                return;
+            }
+
+            // --- Show redirect-chain notice only when domains differ ---
+            if (blockedUrl) {
+                const intendedDomain = getDomain(intendedUrl);
+                const blockedDomain  = getDomain(blockedUrl);
+                if (intendedDomain && blockedDomain && intendedDomain !== blockedDomain) {
+                    document.getElementById('intendedDomain').textContent     = intendedDomain;
+                    document.getElementById('blockedDomain').textContent      = blockedDomain;
+                    document.getElementById('blockedDomainRepeat').textContent = blockedDomain;
+                    document.getElementById('redirectNotice').style.display   = 'block';
+                }
+            }
+
+            // --- Auto-navigate when parent changes config (e.g. disables extension or edits allowlist) ---
+            chrome.storage.onChanged.addListener(async (changes, area) => {
+                if (area === 'local' && (changes.config || changes.currentMode)) {
+                    if (!(await wouldBeBlocked(intendedUrl))) {
+                        window.location.href = intendedUrl;
+                    }
+                }
+            });
         })();
     </script>
 </body>

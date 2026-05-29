@@ -109,12 +109,47 @@ async function hashPassword(password, salt = null) {
 
 /**
  * verifyPassword
- * @param {string} password 
- * @param {string} storedSalt 
- * @param {string} storedHash 
+ * @param {string} password
+ * @param {string} storedSalt
+ * @param {string} storedHash
  * @returns {Promise<boolean>}
  */
 async function verifyPassword(password, storedSalt, storedHash) {
     const result = await hashPassword(password, storedSalt);
     return result.hash === storedHash;
+}
+
+/**
+ * wouldBeBlocked
+ * Checks whether a given URL would currently be blocked by the active rules.
+ * Mirrors the logic in applyRules() so blocked.html can decide whether to
+ * auto-navigate after a config change or page refresh.
+ * @param {string} url
+ * @returns {Promise<boolean>}
+ */
+async function wouldBeBlocked(url) {
+    try {
+        const data = await chrome.storage.local.get(['config', 'currentMode']);
+        const config = data.config || DEFAULT_CONFIG;
+
+        // Master switch off → nothing is blocked
+        if (config.masterEnabled === false) return false;
+
+        const mode = data.currentMode || getCurrentMode(config.schedule);
+        const modeSettings = (config.modes && config.modes[mode]) || { type: 'allowlist', domains: [] };
+        const domains = modeSettings.domains || [];
+
+        let hostname;
+        try { hostname = new URL(url).hostname.replace('www.', ''); } catch (e) { return false; }
+
+        if (modeSettings.type === 'allowlist') {
+            // Blocked unless the domain (or a parent domain) is explicitly allowed
+            return !domains.some(d => hostname === d || hostname.endsWith('.' + d));
+        } else {
+            // Blocked only if the domain is in the blocklist
+            return domains.some(d => hostname === d || hostname.endsWith('.' + d));
+        }
+    } catch (e) {
+        return false;
+    }
 }
