@@ -158,49 +158,42 @@
             try { return new URL(url).hostname.replace('www.', ''); } catch (e) { return url; }
         }
 
-        // Simple, direct approach - calculate mode immediately
+        // Load and display the current mode name
         (async function() {
             const modeElement = document.getElementById('modeName');
             if (!modeElement) return;
 
+            // Hard fallback — if storage takes too long, don't leave "Loading..." forever
+            const fallbackTimer = setTimeout(() => {
+                if (modeElement.textContent === 'Loading...') modeElement.textContent = 'Study';
+            }, 1500);
+
             try {
-                // Get config from storage
                 const data = await chrome.storage.local.get(['config', 'currentMode']);
 
                 let currentMode = null;
 
-                // Try to use stored currentMode first (fastest)
-                if (data.currentMode) {
+                // currentMode is updated by the service worker each minute and on config change.
+                // Skip 'disabled' — calculate the real schedule-based mode instead.
+                if (data.currentMode && data.currentMode !== 'disabled') {
                     currentMode = data.currentMode;
-                }
-                // Otherwise calculate from config
-                else if (data.config && data.config.schedule) {
-                    // Try using getCurrentMode from utils.js, fallback to inline version
-                    if (typeof getCurrentMode !== 'undefined') {
-                        currentMode = getCurrentMode(data.config.schedule);
-                    } else {
-                        currentMode = getCurrentModeInline(data.config.schedule);
-                    }
-                }
-                // Fallback to default
-                else {
-                    const defaultSchedule = {
-                        "07:00": "free",
-                        "15:00": "study",
-                        "18:00": "free",
-                        "20:00": "sleep"
-                    };
-                    currentMode = getCurrentModeInline(defaultSchedule);
+                } else if (data.config && data.config.schedule) {
+                    currentMode = (typeof getCurrentMode !== 'undefined')
+                        ? getCurrentMode(data.config.schedule)
+                        : getCurrentModeInline(data.config.schedule);
+                } else {
+                    currentMode = getCurrentModeInline({
+                        "07:00": "free", "15:00": "study",
+                        "18:00": "free", "20:00": "sleep"
+                    });
                 }
 
-                if (currentMode) {
-                    const modeDisplay = currentMode.charAt(0).toUpperCase() + currentMode.slice(1);
-                    modeElement.textContent = modeDisplay;
-                } else {
-                    modeElement.textContent = 'Study';
-                }
+                clearTimeout(fallbackTimer);
+                modeElement.textContent = currentMode
+                    ? currentMode.charAt(0).toUpperCase() + currentMode.slice(1)
+                    : 'Study';
             } catch (error) {
-                console.error('Error loading mode:', error);
+                clearTimeout(fallbackTimer);
                 modeElement.textContent = 'Study';
             }
         })();
@@ -224,16 +217,15 @@
                     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
                     if (tabs && tabs.length) {
                         const tabId = tabs[0].id;
-                        const sessionData = await chrome.storage.session.get([`blockedNav_${tabId}`]);
-                        const nav = sessionData[`blockedNav_${tabId}`];
-                        if (nav) {
+                        const localData = await chrome.storage.local.get([`blockedNav_${tabId}`]);
+                        const nav = localData[`blockedNav_${tabId}`];
+                        // Ignore stale entries (older than 5 minutes)
+                        if (nav && (Date.now() - (nav.ts || 0)) < 5 * 60 * 1000) {
                             intendedUrl = nav.intendedUrl;
                             blockedUrl  = nav.blockedUrl;
                         }
                     }
-                } catch (e) {
-                    // storage.session not available in older Chrome — silently ignore
-                }
+                } catch (e) { /* silently ignore */ }
             }
 
             if (!intendedUrl) return;

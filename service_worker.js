@@ -260,20 +260,22 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
         tabIntendedUrl[details.tabId] = details.url;
     }
 
-    // Always write the latest snapshot so blocked.html can read it
-    chrome.storage.session.set({
+    // Always write the latest snapshot so blocked.html can read it.
+    // Using chrome.storage.local (not session) for maximum compatibility.
+    chrome.storage.local.set({
         [`blockedNav_${details.tabId}`]: {
             intendedUrl: tabIntendedUrl[details.tabId] || details.url,
             blockedUrl: details.url,
-            isRedirect: isRedirect
+            isRedirect: isRedirect,
+            ts: Date.now()
         }
     });
 });
 
-// Clean up session data when a tab is closed
+// Clean up nav data when a tab is closed
 chrome.tabs.onRemoved.addListener((tabId) => {
     delete tabIntendedUrl[tabId];
-    chrome.storage.session.remove([`blockedNav_${tabId}`]);
+    chrome.storage.local.remove([`blockedNav_${tabId}`]);
 });
 
 // ============================================
