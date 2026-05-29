@@ -242,8 +242,9 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
 // a blocked intermediate redirect from an otherwise-allowed site.
 // ============================================
 
-// In-memory map: tabId -> intended URL (cleared on tab close)
-const tabIntendedUrl = {};
+// In-memory maps: tabId -> URL (cleared on tab close)
+const tabIntendedUrl = {}; // what the user originally typed/clicked
+const tabLastUrl     = {}; // most recent URL navigated to (used as blockedUrl)
 
 chrome.webNavigation.onBeforeNavigate.addListener((details) => {
     if (details.frameId !== 0) return; // main frame only
@@ -259,9 +260,9 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
         // Fresh navigation — this is what the user actually intended
         tabIntendedUrl[details.tabId] = details.url;
     }
+    tabLastUrl[details.tabId] = details.url;
 
-    // Always write the latest snapshot so blocked.html can read it.
-    // Using chrome.storage.local (not session) for maximum compatibility.
+    // Also write to storage as a backup (blocked.html prefers the message API below)
     chrome.storage.local.set({
         [`blockedNav_${details.tabId}`]: {
             intendedUrl: tabIntendedUrl[details.tabId] || details.url,
@@ -272,9 +273,23 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
     });
 });
 
+// blocked.html asks for nav data via message — read straight from memory,
+// no storage round-trip, no race condition.
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === 'getBlockedNav') {
+        const tabId = sender.tab?.id;
+        sendResponse(tabId ? {
+            intendedUrl: tabIntendedUrl[tabId] || null,
+            blockedUrl:  tabLastUrl[tabId]     || null
+        } : null);
+        return true;
+    }
+});
+
 // Clean up nav data when a tab is closed
 chrome.tabs.onRemoved.addListener((tabId) => {
     delete tabIntendedUrl[tabId];
+    delete tabLastUrl[tabId];
     chrome.storage.local.remove([`blockedNav_${tabId}`]);
 });
 

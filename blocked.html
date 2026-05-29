@@ -126,139 +126,114 @@
 
     <script src="utils.js"></script>
     <script>
-        // Inline getCurrentMode function as backup
-        function getCurrentModeInline(schedule) {
-            const now = new Date();
-            const currentMinutes = now.getHours() * 60 + now.getMinutes();
-            const times = Object.keys(schedule).sort();
-            if (times.length === 0) return 'free';
-            
-            const timeToMin = (t) => {
-                const [h, m] = t.split(':').map(Number);
-                return h * 60 + m;
-            };
-            
-            let activeTime = null;
-            for (let i = 0; i < times.length; i++) {
-                if (currentMinutes >= timeToMin(times[i])) {
-                    activeTime = times[i];
-                } else {
-                    break;
-                }
-            }
-            
-            if (activeTime === null) {
-                activeTime = times[times.length - 1];
-            }
-            
-            return schedule[activeTime] || 'free';
-        }
-        
         function getDomain(url) {
             try { return new URL(url).hostname.replace('www.', ''); } catch (e) { return url; }
         }
 
-        // Load and display the current mode name
-        (async function() {
-            const modeElement = document.getElementById('modeName');
-            if (!modeElement) return;
+        // ── Mode badge ────────────────────────────────────────────────────────
+        // Computed synchronously from the current time — zero storage dependency,
+        // never shows "Loading...". We then try to refine it with the real config.
+        (function showModeBadge() {
+            const el = document.getElementById('modeName');
+            if (!el) return;
 
-            // Hard fallback — if storage takes too long, don't leave "Loading..." forever
-            const fallbackTimer = setTimeout(() => {
-                if (modeElement.textContent === 'Loading...') modeElement.textContent = 'Study';
-            }, 1500);
-
-            try {
-                const data = await chrome.storage.local.get(['config', 'currentMode']);
-
-                let currentMode = null;
-
-                // currentMode is updated by the service worker each minute and on config change.
-                // Skip 'disabled' — calculate the real schedule-based mode instead.
-                if (data.currentMode && data.currentMode !== 'disabled') {
-                    currentMode = data.currentMode;
-                } else if (data.config && data.config.schedule) {
-                    currentMode = (typeof getCurrentMode !== 'undefined')
-                        ? getCurrentMode(data.config.schedule)
-                        : getCurrentModeInline(data.config.schedule);
-                } else {
-                    currentMode = getCurrentModeInline({
-                        "07:00": "free", "15:00": "study",
-                        "18:00": "free", "20:00": "sleep"
-                    });
+            function calcMode(schedule) {
+                const mins = new Date().getHours() * 60 + new Date().getMinutes();
+                const times = Object.keys(schedule).sort();
+                if (!times.length) return 'free';
+                let active = times[times.length - 1]; // wrap-around default
+                for (const t of times) {
+                    const [h, m] = t.split(':').map(Number);
+                    if (mins >= h * 60 + m) active = t; else break;
                 }
-
-                clearTimeout(fallbackTimer);
-                modeElement.textContent = currentMode
-                    ? currentMode.charAt(0).toUpperCase() + currentMode.slice(1)
-                    : 'Study';
-            } catch (error) {
-                clearTimeout(fallbackTimer);
-                modeElement.textContent = 'Study';
+                return schedule[active] || 'free';
             }
+
+            const defaultSchedule = {"07:00":"free","15:00":"study","18:00":"free","20:00":"sleep"};
+            const quickMode = calcMode(defaultSchedule);
+            el.textContent = quickMode.charAt(0).toUpperCase() + quickMode.slice(1);
+
+            // Refine with actual user config asynchronously
+            chrome.storage.local.get(['config']).then(data => {
+                if (!data.config?.schedule) return;
+                const mode = calcMode(data.config.schedule);
+                el.textContent = mode.charAt(0).toUpperCase() + mode.slice(1);
+            }).catch(() => {});
         })();
 
-        // Handles three things:
-        // 1. Persist the intended URL in the hash so it survives a page refresh
-        // 2. Auto-navigate if the block has already been removed (e.g. parent just toggled it off)
-        // 3. Show the redirect-chain notice when the blocked domain differs from the intended one
+        // ── Nav tracking & auto-navigate ──────────────────────────────────────
         (async function() {
             let intendedUrl = null;
             let blockedUrl  = null;
 
-            // --- Read intended URL: hash survives refresh, session storage is the first load ---
+            // 1. Hash survives a refresh — try it first
             const hash = window.location.hash;
             if (hash && hash.length > 1) {
                 try { intendedUrl = decodeURIComponent(hash.slice(1)); } catch (e) {}
             }
 
+            // 2. Ask the service worker directly (in memory, no storage race condition)
+            if (!intendedUrl) {
+                try {
+                    const nav = await chrome.runtime.sendMessage({ type: 'getBlockedNav' });
+                    if (nav) { intendedUrl = nav.intendedUrl; blockedUrl = nav.blockedUrl; }
+                } catch (e) {}
+            }
+
+            // 3. Fall back to local storage (backup, may be slightly stale)
             if (!intendedUrl) {
                 try {
                     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-                    if (tabs && tabs.length) {
-                        const tabId = tabs[0].id;
-                        const localData = await chrome.storage.local.get([`blockedNav_${tabId}`]);
-                        const nav = localData[`blockedNav_${tabId}`];
-                        // Ignore stale entries (older than 5 minutes)
-                        if (nav && (Date.now() - (nav.ts || 0)) < 5 * 60 * 1000) {
+                    if (tabs?.length) {
+                        const key = `blockedNav_${tabs[0].id}`;
+                        const data = await chrome.storage.local.get([key]);
+                        const nav  = data[key];
+                        if (nav && Date.now() - (nav.ts || 0) < 5 * 60 * 1000) {
                             intendedUrl = nav.intendedUrl;
                             blockedUrl  = nav.blockedUrl;
                         }
                     }
-                } catch (e) { /* silently ignore */ }
+                } catch (e) {}
             }
+
+            // Persist in hash so refresh retries the right URL
+            if (intendedUrl) {
+                history.replaceState(null, '', `${window.location.pathname}#${encodeURIComponent(intendedUrl)}`);
+            }
+
+            // Register storage-change listener unconditionally so toggling master
+            // off always triggers navigation even when intendedUrl is unknown
+            chrome.storage.onChanged.addListener(async (changes, area) => {
+                if (area !== 'local') return;
+                if (changes.config || changes.currentMode) {
+                    const target = intendedUrl;
+                    if (target && !(await wouldBeBlocked(target))) {
+                        window.location.href = target;
+                    } else if (!target && changes.config?.newValue?.masterEnabled === false) {
+                        history.back(); // No URL? At least go back.
+                    }
+                }
+            });
 
             if (!intendedUrl) return;
 
-            // --- Persist in hash so refresh retries the right URL ---
-            history.replaceState(null, '', `${window.location.pathname}#${encodeURIComponent(intendedUrl)}`);
-
-            // --- If the block is already gone, navigate immediately ---
+            // If the block was already removed before this page loaded, navigate now
             if (!(await wouldBeBlocked(intendedUrl))) {
                 window.location.href = intendedUrl;
                 return;
             }
 
-            // --- Show redirect-chain notice only when domains differ ---
+            // Show redirect-chain notice only when domains differ
             if (blockedUrl) {
-                const intendedDomain = getDomain(intendedUrl);
-                const blockedDomain  = getDomain(blockedUrl);
-                if (intendedDomain && blockedDomain && intendedDomain !== blockedDomain) {
-                    document.getElementById('intendedDomain').textContent     = intendedDomain;
-                    document.getElementById('blockedDomain').textContent      = blockedDomain;
-                    document.getElementById('blockedDomainRepeat').textContent = blockedDomain;
-                    document.getElementById('redirectNotice').style.display   = 'block';
+                const iDomain = getDomain(intendedUrl);
+                const bDomain = getDomain(blockedUrl);
+                if (iDomain && bDomain && iDomain !== bDomain) {
+                    document.getElementById('intendedDomain').textContent      = iDomain;
+                    document.getElementById('blockedDomain').textContent       = bDomain;
+                    document.getElementById('blockedDomainRepeat').textContent = bDomain;
+                    document.getElementById('redirectNotice').style.display    = 'block';
                 }
             }
-
-            // --- Auto-navigate when parent changes config (e.g. disables extension or edits allowlist) ---
-            chrome.storage.onChanged.addListener(async (changes, area) => {
-                if (area === 'local' && (changes.config || changes.currentMode)) {
-                    if (!(await wouldBeBlocked(intendedUrl))) {
-                        window.location.href = intendedUrl;
-                    }
-                }
-            });
         })();
     </script>
 </body>
