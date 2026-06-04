@@ -96,14 +96,20 @@ function setBlockMessage(mode, listType) {
         history.replaceState(null, '', `${window.location.pathname}#${encodeURIComponent(intendedUrl)}`);
     }
 
+    // The URL to check when deciding whether the block has been lifted.
+    // Use blockedUrl (the URL that actually got stopped) if available —
+    // intendedUrl may itself be allowed while still redirecting through
+    // a blocked domain, which would cause an infinite redirect loop.
+    const checkUrl = blockedUrl || intendedUrl;
+
     // Listen for config changes unconditionally — master toggle off must
     // always navigate away, even if we couldn't resolve the intended URL
     chrome.storage.onChanged.addListener(async (changes, area) => {
         if (area !== 'local') return;
         if (changes.config || changes.currentMode) {
-            if (intendedUrl && !(await wouldBeBlocked(intendedUrl))) {
-                window.location.href = intendedUrl;
-            } else if (!intendedUrl && changes.config?.newValue?.masterEnabled === false) {
+            if (checkUrl && !(await wouldBeBlocked(checkUrl))) {
+                window.location.href = intendedUrl || checkUrl;
+            } else if (!checkUrl && changes.config?.newValue?.masterEnabled === false) {
                 history.back();
             }
         }
@@ -111,8 +117,10 @@ function setBlockMessage(mode, listType) {
 
     if (!intendedUrl) return;
 
-    // If the block was already lifted before we loaded, navigate now
-    if (!(await wouldBeBlocked(intendedUrl))) {
+    // If the block was already lifted before we loaded, navigate now.
+    // Check blockedUrl specifically — if intendedUrl is allowed but still
+    // routes through a blocked domain, navigating would loop infinitely.
+    if (!(await wouldBeBlocked(checkUrl))) {
         window.location.href = intendedUrl;
         return;
     }
