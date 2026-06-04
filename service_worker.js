@@ -25,6 +25,7 @@ chrome.action.onClicked.addListener(() => {
 chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === 'checkTime') {
         updateBlockingRules();
+        flushActiveSession(); // persist time spent since last tick
     }
 });
 
@@ -35,200 +36,151 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 // ============================================
-// TIME TRACKING (CAN BE REMOVED IF NEEDED)
+// TIME TRACKING
+//
+// MV3 service workers are killed after ~30s of inactivity, so setInterval
+// and in-memory state are unreliable for long sessions.
+//
+// Fix: persist the active session in chrome.storage.local so it survives
+// the worker sleeping. The 1-minute alarm (which reliably wakes the worker)
+// flushes elapsed time. If >2 min passed between flushes (e.g. computer
+// slept), that gap is skipped to avoid inflated counts.
 // ============================================
-let timeTrackingState = {
-    activeTabId: null,
-    activeUrl: null,
-    startTime: null,
-    isWindowFocused: true,
-    isExtensionEnabled: true
-};
 
-// Check if extension is enabled
-async function checkExtensionEnabled() {
-    const data = await chrome.storage.local.get(['config']);
-    const config = data.config || DEFAULT_CONFIG;
-    return config.masterEnabled !== false;
-}
-
-// Get domain from URL
 function getDomain(url) {
-    try {
-        const urlObj = new URL(url);
-        return urlObj.hostname.replace('www.', '');
-    } catch (e) {
-        return null;
-    }
+    try { return new URL(url).hostname.replace('www.', ''); } catch (e) { return null; }
 }
 
-// Get YYYY-MM-DD for a date
 function getDateKey(date) {
     const d = date || new Date();
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 
-// Save time to storage (all-time and per-day)
-// countVisit: only true when user actually navigates to a tab (not on periodic saves)
-async function saveTime(domain, timeSpent, countVisit = false) {
-    const data = await chrome.storage.local.get(['usageStats']);
+async function checkExtensionEnabled() {
+    const data = await chrome.storage.local.get(['config']);
+    return (data.config || DEFAULT_CONFIG).masterEnabled !== false;
+}
+
+// Persist seconds to usageStats, optionally counting a visit
+async function saveTime(domain, seconds, countVisit = false) {
+    if (!domain) return;
+    const data  = await chrome.storage.local.get(['usageStats']);
     const stats = data.usageStats || {};
-    const todayKey = getDateKey(new Date());
-    
-    if (!stats[domain]) {
-        stats[domain] = {
-            totalSeconds: 0,
-            visitCount: 0,
-            lastVisited: null,
-            days: {}
-        };
-    }
-    
-    stats[domain].totalSeconds += timeSpent;
-    stats[domain].lastVisited = Date.now();
-    
-    if (!stats[domain].days) {
-        stats[domain].days = {};
-    }
-    if (!stats[domain].days[todayKey]) {
-        stats[domain].days[todayKey] = { totalSeconds: 0, visitCount: 0 };
-    }
-    stats[domain].days[todayKey].totalSeconds += timeSpent;
-    
-    // Only count visit when user actually switches to a tab (not on periodic saves)
+    const today = getDateKey(new Date());
+
+    if (!stats[domain]) stats[domain] = { totalSeconds: 0, visitCount: 0, lastVisited: null, days: {} };
+    if (!stats[domain].days) stats[domain].days = {};
+    if (!stats[domain].days[today]) stats[domain].days[today] = { totalSeconds: 0, visitCount: 0 };
+
+    stats[domain].totalSeconds                  += seconds;
+    stats[domain].days[today].totalSeconds      += seconds;
+    stats[domain].lastVisited                    = Date.now();
+
     if (countVisit) {
-        stats[domain].visitCount += 1;
-        stats[domain].days[todayKey].visitCount += 1;
+        stats[domain].visitCount                += 1;
+        stats[domain].days[today].visitCount    += 1;
     }
-    
+
     await chrome.storage.local.set({ usageStats: stats });
 }
 
-// Stop tracking current session
+// Flush time for the current active session and remove it from storage
 async function stopTracking() {
-    if (timeTrackingState.startTime && timeTrackingState.activeUrl) {
-        const timeSpent = Math.floor((Date.now() - timeTrackingState.startTime) / 1000);
-        if (timeSpent > 0) {
-            const domain = getDomain(timeTrackingState.activeUrl);
-            if (domain) {
-                await saveTime(domain, timeSpent);
-            }
-        }
-    }
-    timeTrackingState.startTime = null;
-    timeTrackingState.activeUrl = null;
+    const data    = await chrome.storage.local.get(['activeSession']);
+    const session = data.activeSession;
+    if (!session) return;
+
+    const seconds = Math.floor((Date.now() - session.lastSaveTime) / 1000);
+    if (seconds > 0) await saveTime(session.domain, seconds);
+    await chrome.storage.local.remove(['activeSession']);
 }
 
-// Start tracking a new session
+// Begin tracking a new URL (flushes any previous session first)
 async function startTracking(tabId, url) {
-    await stopTracking(); // Save previous session (time only, no visit count)
-    
+    await stopTracking();
+
     const isEnabled = await checkExtensionEnabled();
-    if (!isEnabled || !timeTrackingState.isWindowFocused) {
+    const focusData = await chrome.storage.local.get(['windowFocused']);
+    const focused   = focusData.windowFocused !== false; // default true
+    if (!isEnabled || !focused) return;
+
+    const domain = getDomain(url);
+    if (!domain) return;
+
+    const now = Date.now();
+    await chrome.storage.local.set({
+        activeSession: { domain, url, tabId, startTime: now, lastSaveTime: now }
+    });
+    await saveTime(domain, 0, true); // count the visit, 0 extra seconds
+}
+
+// Called by the 1-minute alarm — saves elapsed time without ending the session
+async function flushActiveSession() {
+    const data    = await chrome.storage.local.get(['activeSession', 'windowFocused']);
+    const session = data.activeSession;
+    const focused = data.windowFocused !== false;
+    if (!session || !focused) return;
+
+    const now     = Date.now();
+    const elapsed = now - session.lastSaveTime;
+
+    // If the gap is >2 min the worker was asleep / computer was sleeping — skip it
+    if (elapsed > 2 * 60 * 1000) {
+        await chrome.storage.local.set({ activeSession: { ...session, lastSaveTime: now } });
         return;
     }
-    
-    // Record the visit (this is when user actually navigates to a tab)
-    const domain = getDomain(url);
-    if (domain) {
-        await saveTime(domain, 0, true); // 0 seconds, but count the visit
+
+    const seconds = Math.floor(elapsed / 1000);
+    if (seconds > 0) {
+        await saveTime(session.domain, seconds);
+        await chrome.storage.local.set({ activeSession: { ...session, lastSaveTime: now } });
     }
-    
-    timeTrackingState.activeTabId = tabId;
-    timeTrackingState.activeUrl = url;
-    timeTrackingState.startTime = Date.now();
 }
 
-// Handle tab activation
+// ── Event listeners ───────────────────────────────────────────────────────
+
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
     const tab = await chrome.tabs.get(activeInfo.tabId);
-    if (tab.url && (tab.url.startsWith('http://') || tab.url.startsWith('https://'))) {
+    if (tab.url?.startsWith('http://') || tab.url?.startsWith('https://')) {
         await startTracking(activeInfo.tabId, tab.url);
     } else {
         await stopTracking();
     }
 });
 
-// Handle tab updates (URL changes)
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-    if (changeInfo.status === 'complete' && tab.url && 
-        (tab.url.startsWith('http://') || tab.url.startsWith('https://'))) {
-        // Check if this is the active tab
-        const windows = await chrome.windows.getAll({ populate: true });
-        for (const window of windows) {
-            if (window.focused) {
-                for (const wTab of window.tabs || []) {
-                    if (wTab.active && wTab.id === tabId) {
-                        await startTracking(tabId, tab.url);
-                        return;
-                    }
-                }
+    if (changeInfo.status !== 'complete') return;
+    if (!tab.url?.startsWith('http://') && !tab.url?.startsWith('https://')) return;
+    const windows = await chrome.windows.getAll({ populate: true });
+    for (const win of windows) {
+        if (win.focused) {
+            for (const t of win.tabs || []) {
+                if (t.active && t.id === tabId) { await startTracking(tabId, tab.url); return; }
             }
         }
     }
 });
 
-// Handle window focus changes
 chrome.windows.onFocusChanged.addListener(async (windowId) => {
     if (windowId === chrome.windows.WINDOW_ID_NONE) {
-        // Window lost focus
-        timeTrackingState.isWindowFocused = false;
+        await chrome.storage.local.set({ windowFocused: false });
         await stopTracking();
     } else {
-        // Window gained focus
-        timeTrackingState.isWindowFocused = true;
-        const isEnabled = await checkExtensionEnabled();
-        timeTrackingState.isExtensionEnabled = isEnabled;
-        
-        // Get active tab and start tracking
+        await chrome.storage.local.set({ windowFocused: true });
         try {
-            const window = await chrome.windows.get(windowId, { populate: true });
-            if (window.focused) {
-                const activeTab = window.tabs?.find(tab => tab.active);
-                if (activeTab && activeTab.url && 
-                    (activeTab.url.startsWith('http://') || activeTab.url.startsWith('https://'))) {
-                    await startTracking(activeTab.id, activeTab.url);
-                }
+            const win = await chrome.windows.get(windowId, { populate: true });
+            const active = win.tabs?.find(t => t.active);
+            if (active?.url?.startsWith('http://') || active?.url?.startsWith('https://')) {
+                await startTracking(active.id, active.url);
             }
-        } catch (e) {
-            console.error('Error getting window:', e);
-        }
+        } catch (e) {}
     }
 });
 
-// Periodic save (every 10 seconds) to prevent data loss
-setInterval(async () => {
-    if (timeTrackingState.startTime && timeTrackingState.activeUrl && 
-        timeTrackingState.isWindowFocused && timeTrackingState.isExtensionEnabled) {
-        const isEnabled = await checkExtensionEnabled();
-        if (!isEnabled) {
-            await stopTracking();
-            timeTrackingState.isExtensionEnabled = false;
-        } else {
-            // Save current session progress
-            const timeSpent = Math.floor((Date.now() - timeTrackingState.startTime) / 1000);
-            if (timeSpent >= 10) { // Save every 10 seconds
-                const domain = getDomain(timeTrackingState.activeUrl);
-                if (domain) {
-                    await saveTime(domain, timeSpent);
-                    timeTrackingState.startTime = Date.now(); // Reset timer
-                }
-            }
-        }
-    }
-}, 10000); // Check every 10 seconds
-
-// Handle extension disable/enable
+// Extension toggled off → stop tracking
 chrome.storage.onChanged.addListener(async (changes, area) => {
     if (area === 'local' && changes.config) {
-        const isEnabled = await checkExtensionEnabled();
-        timeTrackingState.isExtensionEnabled = isEnabled;
-        if (!isEnabled) {
-            await stopTracking();
-        }
+        if (!(await checkExtensionEnabled())) await stopTracking();
     }
 });
 // ============================================
