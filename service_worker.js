@@ -344,13 +344,15 @@ async function applyRules() {
             });
         });
 
-        // Catch-all redirect for everything else (priority 2)
+        // Catch-all redirect for everything else (priority 2).
+        // regexFilter must be scoped to http/https — '.*' would also match
+        // the extension's own chrome-extension:// URL and cause a redirect loop.
         newRules.push({
             id: 999,
             priority: 2,
             action: redirectToBlocked,
             condition: {
-                regexFilter: '.*',
+                regexFilter: 'https?://',
                 resourceTypes: ['main_frame']
             }
         });
@@ -370,7 +372,7 @@ async function applyRules() {
                 priority: 3,
                 action: redirectToBlocked,
                 condition: {
-                    regexFilter: '.*',
+                    regexFilter: 'https?://',
                     requestDomains: [domain],
                     resourceTypes: ['main_frame']
                 }
