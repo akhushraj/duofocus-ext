@@ -109,10 +109,9 @@
         <img src="/icons/mascot.png" alt="Focus Owl" class="mascot">
         <h1>Focus Time!</h1>
 
-        <p>Why are you visiting blocked sites? Get back to work!</p>
-        <p style="font-size:0.6rem; opacity:0.3;">v4</p>
+        <p id="blockReason">This site isn't available right now.</p>
 
-        <p>Uh oh! This site is taking a nap right now. You are currently in <span class="mode-badge" id="modeName">Loading...</span> mode.</p>
+        <p>You are currently in <span class="mode-badge" id="modeName">...</span> mode.</p>
 
         <!-- Only shown when a redirect chain caused the block -->
         <div id="redirectNotice" style="display:none; margin-top: 1rem; padding: 0.85rem 1.25rem; background: rgba(251,191,36,0.12); border: 1.5px solid rgba(251,191,36,0.4); border-radius: 12px; max-width: 440px; text-align: left;">
@@ -126,117 +125,7 @@
     </div>
 
     <script src="utils.js"></script>
-    <script>
-        function getDomain(url) {
-            try { return new URL(url).hostname.replace('www.', ''); } catch (e) { return url; }
-        }
-
-        // ── Mode badge ────────────────────────────────────────────────────────
-        // Computed synchronously from the current time — zero storage dependency,
-        // never shows "Loading...". We then try to refine it with the real config.
-        (function showModeBadge() {
-            const el = document.getElementById('modeName');
-            if (!el) return;
-
-            function calcMode(schedule) {
-                const mins = new Date().getHours() * 60 + new Date().getMinutes();
-                const times = Object.keys(schedule).sort();
-                if (!times.length) return 'free';
-                let active = times[times.length - 1]; // wrap-around default
-                for (const t of times) {
-                    const [h, m] = t.split(':').map(Number);
-                    if (mins >= h * 60 + m) active = t; else break;
-                }
-                return schedule[active] || 'free';
-            }
-
-            const defaultSchedule = {"07:00":"free","15:00":"study","18:00":"free","20:00":"sleep"};
-            const quickMode = calcMode(defaultSchedule);
-            el.textContent = quickMode.charAt(0).toUpperCase() + quickMode.slice(1);
-
-            // Refine with actual user config asynchronously
-            chrome.storage.local.get(['config']).then(data => {
-                if (!data.config?.schedule) return;
-                const mode = calcMode(data.config.schedule);
-                el.textContent = mode.charAt(0).toUpperCase() + mode.slice(1);
-            }).catch(() => {});
-        })();
-
-        // ── Nav tracking & auto-navigate ──────────────────────────────────────
-        (async function() {
-            let intendedUrl = null;
-            let blockedUrl  = null;
-
-            // 1. Hash survives a refresh — try it first
-            const hash = window.location.hash;
-            if (hash && hash.length > 1) {
-                try { intendedUrl = decodeURIComponent(hash.slice(1)); } catch (e) {}
-            }
-
-            // 2. Ask the service worker directly (in memory, no storage race condition)
-            if (!intendedUrl) {
-                try {
-                    const nav = await chrome.runtime.sendMessage({ type: 'getBlockedNav' });
-                    if (nav) { intendedUrl = nav.intendedUrl; blockedUrl = nav.blockedUrl; }
-                } catch (e) {}
-            }
-
-            // 3. Fall back to local storage (backup, may be slightly stale)
-            if (!intendedUrl) {
-                try {
-                    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-                    if (tabs?.length) {
-                        const key = `blockedNav_${tabs[0].id}`;
-                        const data = await chrome.storage.local.get([key]);
-                        const nav  = data[key];
-                        if (nav && Date.now() - (nav.ts || 0) < 5 * 60 * 1000) {
-                            intendedUrl = nav.intendedUrl;
-                            blockedUrl  = nav.blockedUrl;
-                        }
-                    }
-                } catch (e) {}
-            }
-
-            // Persist in hash so refresh retries the right URL
-            if (intendedUrl) {
-                history.replaceState(null, '', `${window.location.pathname}#${encodeURIComponent(intendedUrl)}`);
-            }
-
-            // Register storage-change listener unconditionally so toggling master
-            // off always triggers navigation even when intendedUrl is unknown
-            chrome.storage.onChanged.addListener(async (changes, area) => {
-                if (area !== 'local') return;
-                if (changes.config || changes.currentMode) {
-                    const target = intendedUrl;
-                    if (target && !(await wouldBeBlocked(target))) {
-                        window.location.href = target;
-                    } else if (!target && changes.config?.newValue?.masterEnabled === false) {
-                        history.back(); // No URL? At least go back.
-                    }
-                }
-            });
-
-            if (!intendedUrl) return;
-
-            // If the block was already removed before this page loaded, navigate now
-            if (!(await wouldBeBlocked(intendedUrl))) {
-                window.location.href = intendedUrl;
-                return;
-            }
-
-            // Show redirect-chain notice only when domains differ
-            if (blockedUrl) {
-                const iDomain = getDomain(intendedUrl);
-                const bDomain = getDomain(blockedUrl);
-                if (iDomain && bDomain && iDomain !== bDomain) {
-                    document.getElementById('intendedDomain').textContent      = iDomain;
-                    document.getElementById('blockedDomain').textContent       = bDomain;
-                    document.getElementById('blockedDomainRepeat').textContent = bDomain;
-                    document.getElementById('redirectNotice').style.display    = 'block';
-                }
-            }
-        })();
-    </script>
+    <script src="blocked.js"></script>
 </body>
 
 </html>

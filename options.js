@@ -57,6 +57,8 @@ async function init() {
     }
 
     checkLockState();
+    // Auto-focus the password field so the user can type immediately
+    ELEMENTS.passwordInput.focus();
 
     // Event Listeners
     ELEMENTS.unlockBtn.addEventListener('click', handleUnlockOrSetup);
@@ -309,8 +311,10 @@ async function handleUnlockOrSetup() {
     const password = ELEMENTS.passwordInput.value;
     if (!password) {
         ELEMENTS.lockError.textContent = "Password cannot be empty.";
+        ELEMENTS.lockError.style.display = 'block';
         return;
     }
+    ELEMENTS.lockError.style.display = 'none';
 
     if (!currentConfig.passwordHash) {
         const { salt, hash } = await hashPassword(password);
@@ -331,6 +335,7 @@ async function handleUnlockOrSetup() {
             showSettings();
         } else {
             ELEMENTS.lockError.textContent = "Incorrect password.";
+            ELEMENTS.lockError.style.display = 'block';
         }
     }
     ELEMENTS.passwordInput.value = '';

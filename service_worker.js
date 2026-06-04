@@ -278,11 +278,22 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'getBlockedNav') {
         const tabId = sender.tab?.id;
-        sendResponse(tabId ? {
-            intendedUrl: tabIntendedUrl[tabId] || null,
-            blockedUrl:  tabLastUrl[tabId]     || null
-        } : null);
-        return true;
+        // Also include current mode + list type so blocked.html can show
+        // the right reason message without needing a separate storage read.
+        chrome.storage.local.get(['config', 'currentMode']).then(data => {
+            const config = data.config || DEFAULT_CONFIG;
+            const mode = (data.currentMode && data.currentMode !== 'disabled')
+                ? data.currentMode
+                : getCurrentMode(config.schedule);
+            const modeSettings = (config.modes && config.modes[mode]) || { type: 'allowlist' };
+            sendResponse(tabId ? {
+                intendedUrl: tabIntendedUrl[tabId] || null,
+                blockedUrl:  tabLastUrl[tabId]     || null,
+                mode:        mode,
+                listType:    modeSettings.type || 'allowlist'
+            } : null);
+        });
+        return true; // keep channel open for async response
     }
 });
 

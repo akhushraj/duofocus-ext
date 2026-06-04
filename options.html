@@ -19,8 +19,10 @@
             <p id="lockMessage" style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.9rem;">Enter parent password to unlock.</p>
             <input type="password" id="passwordInput" placeholder="Enter your password">
             <button id="unlockBtn" style="width: 100%; margin-top: 0.5rem;">Unlock</button>
-            <p id="lockError" class="error"></p>
-            <button id="resetPasswordBtn" class="danger" style="width: 100%; margin-top: 0.5rem; font-size: 0.85rem; padding: 0.5rem;">Reset Password (Clears All Settings)</button>
+            <p id="lockError" class="error" style="display:none;"></p>
+            <div style="text-align:center; margin-top: 1.25rem;">
+                <button id="resetPasswordBtn" style="background:none; border:none; color:var(--text-secondary); font-size:0.78rem; cursor:pointer; text-decoration:underline; padding:0; opacity:0.6;">Reset password (clears all settings)</button>
+            </div>
         </div>
     </div>
 
