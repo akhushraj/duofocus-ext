@@ -53,25 +53,28 @@ function setBlockMessage(mode, listType) {
     let mode        = null;
     let listType    = null;
 
-    // 1. Hash survives a refresh — fastest path
+    // 1. Hash survives a refresh — encode both URLs as "intended|blocked"
     const hash = window.location.hash;
     if (hash && hash.length > 1) {
-        try { intendedUrl = decodeURIComponent(hash.slice(1)); } catch (e) {}
+        const parts = hash.slice(1).split('|');
+        try { intendedUrl = decodeURIComponent(parts[0]); } catch (e) {}
+        if (parts[1]) { try { blockedUrl = decodeURIComponent(parts[1]); } catch (e) {} }
     }
 
-    // 2. Ask the service worker directly (reads from memory, no storage race)
+    // 2. Always ask the service worker — it has the freshest blockedUrl in memory.
+    //    Even if intendedUrl came from the hash we still need blockedUrl.
     try {
         const nav = await chrome.runtime.sendMessage({ type: 'getBlockedNav' });
         if (nav) {
             if (!intendedUrl) intendedUrl = nav.intendedUrl;
-            blockedUrl = nav.blockedUrl;
-            mode       = nav.mode;
-            listType   = nav.listType;
+            if (nav.blockedUrl) blockedUrl = nav.blockedUrl; // always prefer fresh value
+            mode     = nav.mode;
+            listType = nav.listType;
         }
     } catch (e) {}
 
-    // 3. Fall back to local storage
-    if (!intendedUrl) {
+    // 3. Fill any remaining gaps from local storage
+    if (!intendedUrl || !blockedUrl) {
         try {
             const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
             if (tabs?.length) {
@@ -79,10 +82,10 @@ function setBlockMessage(mode, listType) {
                 const data = await chrome.storage.local.get([key]);
                 const nav  = data[key];
                 if (nav && Date.now() - (nav.ts || 0) < 5 * 60 * 1000) {
-                    intendedUrl = nav.intendedUrl;
-                    blockedUrl  = nav.blockedUrl;
-                    mode        = nav.mode;
-                    listType    = nav.listType;
+                    if (!intendedUrl) intendedUrl = nav.intendedUrl;
+                    if (!blockedUrl)  blockedUrl  = nav.blockedUrl;
+                    if (!mode)        mode        = nav.mode;
+                    if (!listType)    listType    = nav.listType;
                 }
             }
         } catch (e) {}
@@ -91,9 +94,13 @@ function setBlockMessage(mode, listType) {
     // Update the reason message now that we know mode/listType
     if (mode || listType) setBlockMessage(mode, listType);
 
-    // Persist in hash so a page refresh retries the right URL
+    // Persist both URLs in the hash so a refresh has everything it needs
+    // without depending on the service worker being awake
     if (intendedUrl) {
-        history.replaceState(null, '', `${window.location.pathname}#${encodeURIComponent(intendedUrl)}`);
+        const hashVal = blockedUrl
+            ? `${encodeURIComponent(intendedUrl)}|${encodeURIComponent(blockedUrl)}`
+            : encodeURIComponent(intendedUrl);
+        history.replaceState(null, '', `${window.location.pathname}#${hashVal}`);
     }
 
     // The URL to check when deciding whether the block has been lifted.
