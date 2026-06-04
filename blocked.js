@@ -53,12 +53,24 @@ function setBlockMessage(mode, listType) {
     let mode        = null;
     let listType    = null;
 
-    // 1. Hash survives a refresh — encode both URLs as "intended|blocked"
+    // 1. Read from hash — two possible formats:
+    //    a) Raw URL embedded by regexSubstitution on first load:
+    //       blocked.html#https://www.reddit.com/r/gaming
+    //    b) Our encoded "intended|blocked" format set on subsequent loads:
+    //       blocked.html#https%3A%2F%2Fschoology.com|https%3A%2F%2Fpowerschool.com
     const hash = window.location.hash;
     if (hash && hash.length > 1) {
-        const parts = hash.slice(1).split('|');
-        try { intendedUrl = decodeURIComponent(parts[0]); } catch (e) {}
-        if (parts[1]) { try { blockedUrl = decodeURIComponent(parts[1]); } catch (e) {} }
+        const raw = hash.slice(1);
+        if (raw.includes('%7C') || raw.includes('|')) {
+            // Our encoded format (| encoded as %7C or literal)
+            const decoded = raw.replace(/%7C/gi, '|');
+            const idx = decoded.indexOf('|');
+            try { intendedUrl = decodeURIComponent(decoded.slice(0, idx)); } catch (e) {}
+            try { blockedUrl  = decodeURIComponent(decoded.slice(idx + 1)); } catch (e) {}
+        } else {
+            // Raw URL from regexSubstitution — this IS the blocked URL
+            blockedUrl = raw; // no decoding needed, it's a literal URL
+        }
     }
 
     // 2. Always ask the service worker — it has the freshest blockedUrl in memory.
@@ -94,13 +106,12 @@ function setBlockMessage(mode, listType) {
     // Update the reason message now that we know mode/listType
     if (mode || listType) setBlockMessage(mode, listType);
 
-    // Persist both URLs in the hash so a refresh has everything it needs
-    // without depending on the service worker being awake
-    if (intendedUrl) {
-        const hashVal = blockedUrl
-            ? `${encodeURIComponent(intendedUrl)}|${encodeURIComponent(blockedUrl)}`
-            : encodeURIComponent(intendedUrl);
-        history.replaceState(null, '', `${window.location.pathname}#${hashVal}`);
+    // Persist both URLs in the hash so a refresh works without the service worker.
+    // Use our "intended|blocked" encoded format.
+    if (intendedUrl || blockedUrl) {
+        const i = encodeURIComponent(intendedUrl || '');
+        const b = encodeURIComponent(blockedUrl  || '');
+        history.replaceState(null, '', `${window.location.pathname}#${i}|${b}`);
     }
 
     // The URL to check when deciding whether the block has been lifted.

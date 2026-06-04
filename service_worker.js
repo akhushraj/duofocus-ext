@@ -321,16 +321,21 @@ async function applyRules() {
     // Base ID for dynamic rules to avoid conflict with static rules (ID 1)
     const BASE_ID = 1000;
 
+    // Embed the blocked URL directly in the redirect using regexSubstitution.
+    // \0 is replaced by the full matched URL, so blocked.html always knows
+    // what was blocked — no service-worker memory or storage round-trip needed.
+    const blockedPageBase = chrome.runtime.getURL('/blocked.html');
+    const redirectToBlocked = {
+        type: 'redirect',
+        redirect: { regexSubstitution: `${blockedPageBase}#\\0` }
+    };
+
     if (type === 'allowlist') {
-        // In allowlist mode, we need to:
-        // 1. Allow specific domains (priority 3 - higher than static block)
-        // 2. Block everything else (priority 2 - lower than allows, but higher than static)
-        
-        // First, add allow rules for each domain (higher priority)
+        // Allow specific domains (priority 3)
         domains.forEach((domain, index) => {
             newRules.push({
                 id: BASE_ID + index,
-                priority: 3, // Higher priority than the static block rule
+                priority: 3,
                 action: { type: 'allow' },
                 condition: {
                     urlFilter: `||${domain}`,
@@ -338,24 +343,19 @@ async function applyRules() {
                 }
             });
         });
-        
-        // Then, add a catch-all block rule for everything else (lower priority than allows)
-        // This will block anything not explicitly allowed
+
+        // Catch-all redirect for everything else (priority 2)
         newRules.push({
             id: 999,
-            priority: 2, // Higher than static (1), but lower than allows (3)
-            action: {
-                type: 'redirect',
-                redirect: { extensionPath: '/blocked.html' }
-            },
+            priority: 2,
+            action: redirectToBlocked,
             condition: {
-                urlFilter: '*',
+                regexFilter: '.*',
                 resourceTypes: ['main_frame']
             }
         });
     } else {
-        // Blocklist
-        // Rule to Unblock Everything (ID 999)
+        // Blocklist — allow everything by default
         newRules.push({
             id: 999,
             priority: 2,
@@ -364,16 +364,14 @@ async function applyRules() {
         });
 
         domains.forEach((domain, index) => {
-            // 1. Redirect Main Frame (The friendly blocked page)
+            // 1. Redirect main frame to blocked page, embedding the blocked URL
             newRules.push({
-                id: BASE_ID + index, // e.g., 1000, 1001
+                id: BASE_ID + index,
                 priority: 3,
-                action: {
-                    type: 'redirect',
-                    redirect: { extensionPath: '/blocked.html' }
-                },
+                action: redirectToBlocked,
                 condition: {
-                    urlFilter: `||${domain}`,
+                    regexFilter: '.*',
+                    requestDomains: [domain],
                     resourceTypes: ['main_frame']
                 }
             });
