@@ -352,7 +352,7 @@ async function applyRules() {
             priority: 2,
             action: redirectToBlocked,
             condition: {
-                regexFilter: 'https?://',
+                regexFilter: 'https?://.*',
                 resourceTypes: ['main_frame']
             }
         });
@@ -372,7 +372,7 @@ async function applyRules() {
                 priority: 3,
                 action: redirectToBlocked,
                 condition: {
-                    regexFilter: 'https?://',
+                    regexFilter: 'https?://.*',
                     requestDomains: [domain],
                     resourceTypes: ['main_frame']
                 }
