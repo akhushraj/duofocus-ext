@@ -321,13 +321,9 @@ async function applyRules() {
     // Base ID for dynamic rules to avoid conflict with static rules (ID 1)
     const BASE_ID = 1000;
 
-    // Embed the blocked URL directly in the redirect using regexSubstitution.
-    // \0 is replaced by the full matched URL, so blocked.html always knows
-    // what was blocked — no service-worker memory or storage round-trip needed.
-    const blockedPageBase = chrome.runtime.getURL('/blocked.html');
     const redirectToBlocked = {
         type: 'redirect',
-        redirect: { regexSubstitution: `${blockedPageBase}#\\0` }
+        redirect: { extensionPath: '/blocked.html' }
     };
 
     if (type === 'allowlist') {
@@ -344,15 +340,13 @@ async function applyRules() {
             });
         });
 
-        // Catch-all redirect for everything else (priority 2).
-        // regexFilter must be scoped to http/https — '.*' would also match
-        // the extension's own chrome-extension:// URL and cause a redirect loop.
+        // Catch-all redirect for everything else (priority 2)
         newRules.push({
             id: 999,
             priority: 2,
             action: redirectToBlocked,
             condition: {
-                regexFilter: 'https?://.*',
+                urlFilter: '*',
                 resourceTypes: ['main_frame']
             }
         });
@@ -366,14 +360,13 @@ async function applyRules() {
         });
 
         domains.forEach((domain, index) => {
-            // 1. Redirect main frame to blocked page, embedding the blocked URL
+            // Redirect main frame to blocked page
             newRules.push({
                 id: BASE_ID + index,
                 priority: 3,
                 action: redirectToBlocked,
                 condition: {
-                    regexFilter: 'https?://.*',
-                    requestDomains: [domain],
+                    urlFilter: `||${domain}`,
                     resourceTypes: ['main_frame']
                 }
             });

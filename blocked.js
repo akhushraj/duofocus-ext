@@ -1,15 +1,17 @@
 // blocked.js — Logic for the blocked/focus page
+// Clean rewrite: service worker message → sessionStorage fallback → local storage fallback
+
+// ── Helpers ───────────────────────────────────────────────────────────────
 
 function getDomain(url) {
-    try { return new URL(url).hostname.replace('www.', ''); } catch (e) { return url; }
+    try { return new URL(url).hostname.replace(/^www\./, ''); } catch (e) { return null; }
 }
 
-// ── Mode badge ────────────────────────────────────────────────────────────
 function calcMode(schedule) {
-    const mins = new Date().getHours() * 60 + new Date().getMinutes();
+    const mins  = new Date().getHours() * 60 + new Date().getMinutes();
     const times = Object.keys(schedule).sort();
     if (!times.length) return 'free';
-    let active = times[times.length - 1]; // wrap-around default
+    let active = times[times.length - 1];
     for (const t of times) {
         const [h, m] = t.split(':').map(Number);
         if (mins >= h * 60 + m) active = t; else break;
@@ -17,85 +19,94 @@ function calcMode(schedule) {
     return schedule[active] || 'free';
 }
 
-function setModeBadge(mode) {
+// ── Mode badge (synchronous — no storage needed) ──────────────────────────
+
+(function () {
     const el = document.getElementById('modeName');
-    if (el) el.textContent = mode.charAt(0).toUpperCase() + mode.slice(1);
-}
-
-// Show immediately using the default schedule (no storage needed)
-const DEFAULT_SCHEDULE = {"07:00":"free","15:00":"study","18:00":"free","20:00":"sleep"};
-setModeBadge(calcMode(DEFAULT_SCHEDULE));
-
-// Then refine from the user's actual config
-chrome.storage.local.get(['config']).then(data => {
-    if (data.config?.schedule) setModeBadge(calcMode(data.config.schedule));
-}).catch(() => {});
+    if (!el) return;
+    const DEFAULT = { "07:00": "free", "15:00": "study", "18:00": "free", "20:00": "sleep" };
+    const mode    = calcMode(DEFAULT);
+    el.textContent = mode[0].toUpperCase() + mode.slice(1);
+    // Refine with actual config
+    chrome.storage.local.get(['config']).then(d => {
+        if (!d.config?.schedule) return;
+        const m = calcMode(d.config.schedule);
+        el.textContent = m[0].toUpperCase() + m.slice(1);
+    }).catch(() => {});
+})();
 
 // ── Block reason message ──────────────────────────────────────────────────
+
 function setBlockMessage(mode, listType) {
     const el = document.getElementById('blockReason');
     if (!el) return;
-    if (mode === 'sleep') {
-        el.textContent = "It's sleep time 🌙 — screen time is over for now.";
-    } else if (mode === 'study' && listType === 'allowlist') {
-        el.textContent = "You're in Study mode — only your approved sites are accessible.";
-    } else if (listType === 'blocklist') {
-        el.textContent = "This site has been blocked.";
-    } else {
-        el.textContent = "This site isn't available right now.";
-    }
+    if (mode === 'sleep')                         el.textContent = "It's sleep time 🌙 — screen time is over for now.";
+    else if (listType === 'allowlist')             el.textContent = "You're in Study mode — only your approved sites are accessible.";
+    else if (listType === 'blocklist')             el.textContent = "This site has been blocked.";
+    else                                           el.textContent = "This site isn't available right now.";
 }
 
-// ── Nav tracking & auto-navigate ──────────────────────────────────────────
+// ── Redirect chain notice ─────────────────────────────────────────────────
+
+function showRedirectNotice(intendedUrl, blockedUrl) {
+    const iDomain = getDomain(intendedUrl);
+    const bDomain = getDomain(blockedUrl);
+    if (!iDomain || !bDomain || iDomain === bDomain) return;
+    document.getElementById('intendedDomain').textContent      = iDomain;
+    document.getElementById('blockedDomain').textContent       = bDomain;
+    document.getElementById('blockedDomainRepeat').textContent = bDomain;
+    document.getElementById('redirectNotice').style.display    = 'block';
+}
+
+// ── Main nav tracking & auto-navigate ────────────────────────────────────
+
 (async function () {
+    const SESSION_KEY = 'duofocus_nav'; // sessionStorage key (per-tab, auto-cleared on tab close)
+
     let intendedUrl = null;
     let blockedUrl  = null;
     let mode        = null;
     let listType    = null;
 
-    // 1. Read from hash — two possible formats:
-    //    a) Raw URL embedded by regexSubstitution on first load:
-    //       blocked.html#https://www.reddit.com/r/gaming
-    //    b) Our encoded "intended|blocked" format set on subsequent loads:
-    //       blocked.html#https%3A%2F%2Fschoology.com|https%3A%2F%2Fpowerschool.com
-    const hash = window.location.hash;
-    if (hash && hash.length > 1) {
-        const raw = hash.slice(1);
-        if (raw.includes('%7C') || raw.includes('|')) {
-            // Our encoded format (| encoded as %7C or literal)
-            const decoded = raw.replace(/%7C/gi, '|');
-            const idx = decoded.indexOf('|');
-            try { intendedUrl = decodeURIComponent(decoded.slice(0, idx)); } catch (e) {}
-            try { blockedUrl  = decodeURIComponent(decoded.slice(idx + 1)); } catch (e) {}
-        } else {
-            // Raw URL from regexSubstitution — this IS the blocked URL
-            blockedUrl = raw; // no decoding needed, it's a literal URL
-        }
-    }
-
-    // 2. Always ask the service worker — it has the freshest blockedUrl in memory.
-    //    Even if intendedUrl came from the hash we still need blockedUrl.
+    // ── 1. Ask the service worker (primary source) ────────────────────────
+    // The SW is guaranteed awake — it just processed onBeforeNavigate for
+    // the blocked URL milliseconds ago. tabIntendedUrl and tabLastUrl are set.
     try {
         const nav = await chrome.runtime.sendMessage({ type: 'getBlockedNav' });
-        if (nav) {
-            if (!intendedUrl) intendedUrl = nav.intendedUrl;
-            if (nav.blockedUrl) blockedUrl = nav.blockedUrl; // always prefer fresh value
-            mode     = nav.mode;
-            listType = nav.listType;
-        }
+        if (nav?.blockedUrl)  blockedUrl  = nav.blockedUrl;
+        if (nav?.intendedUrl) intendedUrl = nav.intendedUrl;
+        if (nav?.mode)        mode        = nav.mode;
+        if (nav?.listType)    listType    = nav.listType;
     } catch (e) {}
 
-    // 3. Fill any remaining gaps from local storage
-    if (!intendedUrl || !blockedUrl) {
+    // ── 2. sessionStorage fallback (survives same-tab refresh) ───────────
+    // sessionStorage is per-tab and synchronous — no race condition.
+    // We read it when the SW message returned nothing (SW restarted).
+    if (!blockedUrl) {
+        try {
+            const stored = sessionStorage.getItem(SESSION_KEY);
+            if (stored) {
+                const nav = JSON.parse(stored);
+                blockedUrl  = nav.blockedUrl  || null;
+                intendedUrl = nav.intendedUrl || null;
+                mode        = nav.mode        || null;
+                listType    = nav.listType    || null;
+            }
+        } catch (e) {}
+    }
+
+    // ── 3. Local storage fallback (very fresh entries only) ──────────────
+    if (!blockedUrl) {
         try {
             const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
             if (tabs?.length) {
                 const key  = `blockedNav_${tabs[0].id}`;
                 const data = await chrome.storage.local.get([key]);
                 const nav  = data[key];
-                if (nav && Date.now() - (nav.ts || 0) < 5 * 60 * 1000) {
-                    if (!intendedUrl) intendedUrl = nav.intendedUrl;
+                // Only trust entries written in the last 30 seconds
+                if (nav && Date.now() - (nav.ts || 0) < 30_000) {
                     if (!blockedUrl)  blockedUrl  = nav.blockedUrl;
+                    if (!intendedUrl) intendedUrl = nav.intendedUrl;
                     if (!mode)        mode        = nav.mode;
                     if (!listType)    listType    = nav.listType;
                 }
@@ -103,55 +114,41 @@ function setBlockMessage(mode, listType) {
         } catch (e) {}
     }
 
-    // Update the reason message now that we know mode/listType
-    if (mode || listType) setBlockMessage(mode, listType);
-
-    // Persist both URLs in the hash so a refresh works without the service worker.
-    // Use our "intended|blocked" encoded format.
-    if (intendedUrl || blockedUrl) {
-        const i = encodeURIComponent(intendedUrl || '');
-        const b = encodeURIComponent(blockedUrl  || '');
-        history.replaceState(null, '', `${window.location.pathname}#${i}|${b}`);
+    // ── 4. Persist in sessionStorage for future refreshes ────────────────
+    if (blockedUrl) {
+        try {
+            sessionStorage.setItem(SESSION_KEY, JSON.stringify({ blockedUrl, intendedUrl, mode, listType }));
+        } catch (e) {}
     }
 
-    // The URL to check when deciding whether the block has been lifted.
-    // Use blockedUrl (the URL that actually got stopped) if available —
-    // intendedUrl may itself be allowed while still redirecting through
-    // a blocked domain, which would cause an infinite redirect loop.
-    const checkUrl = blockedUrl || intendedUrl;
+    // ── 5. Update UI ──────────────────────────────────────────────────────
+    if (mode || listType) setBlockMessage(mode, listType);
+    if (intendedUrl && blockedUrl) showRedirectNotice(intendedUrl, blockedUrl);
 
-    // Listen for config changes unconditionally — master toggle off must
-    // always navigate away, even if we couldn't resolve the intended URL
-    chrome.storage.onChanged.addListener(async (changes, area) => {
-        if (area !== 'local') return;
-        if (changes.config || changes.currentMode) {
-            if (checkUrl && !(await wouldBeBlocked(checkUrl))) {
-                window.location.href = intendedUrl || checkUrl;
-            } else if (!checkUrl && changes.config?.newValue?.masterEnabled === false) {
-                history.back();
-            }
-        }
-    });
-
-    if (!intendedUrl) return;
-
-    // If the block was already lifted before we loaded, navigate now.
-    // Check blockedUrl specifically — if intendedUrl is allowed but still
-    // routes through a blocked domain, navigating would loop infinitely.
-    if (!(await wouldBeBlocked(checkUrl))) {
-        window.location.href = intendedUrl;
+    // ── 6. Auto-navigate check ────────────────────────────────────────────
+    // CRITICAL: only use blockedUrl here, NEVER intendedUrl.
+    // If intendedUrl (e.g. schoology.com) is allowed but redirects through
+    // a blocked domain (powerschool.com), using intendedUrl would loop forever.
+    if (blockedUrl && !(await wouldBeBlocked(blockedUrl))) {
+        window.location.href = intendedUrl || blockedUrl;
         return;
     }
 
-    // Show redirect-chain notice only when domains differ
-    if (blockedUrl) {
-        const iDomain = getDomain(intendedUrl);
-        const bDomain = getDomain(blockedUrl);
-        if (iDomain && bDomain && iDomain !== bDomain) {
-            document.getElementById('intendedDomain').textContent      = iDomain;
-            document.getElementById('blockedDomain').textContent       = bDomain;
-            document.getElementById('blockedDomainRepeat').textContent = bDomain;
-            document.getElementById('redirectNotice').style.display    = 'block';
+    // ── 7. Listen for config changes (e.g. parent disables extension) ─────
+    chrome.storage.onChanged.addListener(async (changes, area) => {
+        if (area !== 'local') return;
+
+        // Master toggle off → unblock everything
+        if (changes.config?.newValue?.masterEnabled === false) {
+            window.location.href = intendedUrl || blockedUrl || 'about:blank';
+            return;
         }
-    }
+
+        // Allowlist / blocklist change — re-check only if we know the blocked URL
+        if (blockedUrl && (changes.config || changes.currentMode)) {
+            if (!(await wouldBeBlocked(blockedUrl))) {
+                window.location.href = intendedUrl || blockedUrl;
+            }
+        }
+    });
 })();
