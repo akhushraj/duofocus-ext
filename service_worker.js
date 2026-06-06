@@ -225,26 +225,31 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
     });
 });
 
-// blocked.html asks for nav data via message — read straight from memory,
-// no storage round-trip, no race condition.
+// blocked.html asks for nav data via message.
+// IMPORTANT: we delay the response by 150ms so that any pending
+// onBeforeNavigate events (e.g. for the redirect destination like
+// powerschool.com) are processed by the SW before we read tabLastUrl.
+// Without the delay, blocked.html's message arrives before the SW
+// has processed onBeforeNavigate for the actual blocked URL, so
+// tabLastUrl still points to the originally-typed URL (schoology.com).
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'getBlockedNav') {
         const tabId = sender.tab?.id;
-        // Also include current mode + list type so blocked.html can show
-        // the right reason message without needing a separate storage read.
-        chrome.storage.local.get(['config', 'currentMode']).then(data => {
-            const config = data.config || DEFAULT_CONFIG;
-            const mode = (data.currentMode && data.currentMode !== 'disabled')
-                ? data.currentMode
-                : getCurrentMode(config.schedule);
-            const modeSettings = (config.modes && config.modes[mode]) || { type: 'allowlist' };
-            sendResponse(tabId ? {
-                intendedUrl: tabIntendedUrl[tabId] || null,
-                blockedUrl:  tabLastUrl[tabId]     || null,
-                mode:        mode,
-                listType:    modeSettings.type || 'allowlist'
-            } : null);
-        });
+        setTimeout(() => {
+            chrome.storage.local.get(['config', 'currentMode']).then(data => {
+                const config = data.config || DEFAULT_CONFIG;
+                const mode = (data.currentMode && data.currentMode !== 'disabled')
+                    ? data.currentMode
+                    : getCurrentMode(config.schedule);
+                const modeSettings = (config.modes && config.modes[mode]) || { type: 'allowlist' };
+                sendResponse(tabId ? {
+                    intendedUrl: tabIntendedUrl[tabId] || null,
+                    blockedUrl:  tabLastUrl[tabId]     || null,
+                    mode:        mode,
+                    listType:    modeSettings.type || 'allowlist'
+                } : null);
+            });
+        }, 150);
         return true; // keep channel open for async response
     }
 });
