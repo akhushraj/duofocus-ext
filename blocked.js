@@ -68,20 +68,27 @@ function showRedirectNotice(intendedUrl, blockedUrl) {
     let mode        = null;
     let listType    = null;
 
+    function dbg(msg) {
+        const el = document.getElementById('debugInfo');
+        if (el) el.textContent += msg + '\n';
+        console.log('[duofocus]', msg);
+    }
+
+    dbg('blocked.js started');
+
     // ── 1. Ask the service worker (primary source) ────────────────────────
-    // The SW is guaranteed awake — it just processed onBeforeNavigate for
-    // the blocked URL milliseconds ago. tabIntendedUrl and tabLastUrl are set.
     try {
         const nav = await chrome.runtime.sendMessage({ type: 'getBlockedNav' });
+        dbg('SW message: ' + JSON.stringify(nav));
         if (nav?.blockedUrl)  blockedUrl  = nav.blockedUrl;
         if (nav?.intendedUrl) intendedUrl = nav.intendedUrl;
         if (nav?.mode)        mode        = nav.mode;
         if (nav?.listType)    listType    = nav.listType;
-    } catch (e) {}
+    } catch (e) { dbg('SW message error: ' + e); }
+
+    dbg('after SW: intended=' + intendedUrl + ' blocked=' + blockedUrl);
 
     // ── 2. sessionStorage fallback (survives same-tab refresh) ───────────
-    // sessionStorage is per-tab and synchronous — no race condition.
-    // We read it when the SW message returned nothing (SW restarted).
     if (!blockedUrl) {
         try {
             const stored = sessionStorage.getItem(SESSION_KEY);
@@ -91,8 +98,9 @@ function showRedirectNotice(intendedUrl, blockedUrl) {
                 intendedUrl = nav.intendedUrl || null;
                 mode        = nav.mode        || null;
                 listType    = nav.listType    || null;
+                dbg('sessionStorage: ' + JSON.stringify(nav));
             }
-        } catch (e) {}
+        } catch (e) { dbg('sessionStorage error: ' + e); }
     }
 
     // ── 3. Local storage fallback (very fresh entries only) ──────────────
@@ -103,22 +111,23 @@ function showRedirectNotice(intendedUrl, blockedUrl) {
                 const key  = `blockedNav_${tabs[0].id}`;
                 const data = await chrome.storage.local.get([key]);
                 const nav  = data[key];
-                // Only trust entries written in the last 30 seconds
-                if (nav && Date.now() - (nav.ts || 0) < 30_000) {
+                const age  = nav ? Date.now() - (nav.ts || 0) : -1;
+                dbg('localStorage entry: ' + JSON.stringify(nav) + ' age=' + age + 'ms');
+                if (nav && age < 30_000) {
                     if (!blockedUrl)  blockedUrl  = nav.blockedUrl;
                     if (!intendedUrl) intendedUrl = nav.intendedUrl;
                     if (!mode)        mode        = nav.mode;
                     if (!listType)    listType    = nav.listType;
                 }
             }
-        } catch (e) {}
+        } catch (e) { dbg('localStorage error: ' + e); }
     }
+
+    dbg('final: intended=' + intendedUrl + ' blocked=' + blockedUrl);
 
     // ── 4. Persist in sessionStorage for future refreshes ────────────────
     if (blockedUrl) {
-        try {
-            sessionStorage.setItem(SESSION_KEY, JSON.stringify({ blockedUrl, intendedUrl, mode, listType }));
-        } catch (e) {}
+        try { sessionStorage.setItem(SESSION_KEY, JSON.stringify({ blockedUrl, intendedUrl, mode, listType })); } catch (e) {}
     }
 
     // ── 5. Update UI ──────────────────────────────────────────────────────
@@ -126,25 +135,23 @@ function showRedirectNotice(intendedUrl, blockedUrl) {
     if (intendedUrl && blockedUrl) showRedirectNotice(intendedUrl, blockedUrl);
 
     // ── 6. Auto-navigate check ────────────────────────────────────────────
-    // CRITICAL: only use blockedUrl here, NEVER intendedUrl.
-    // If intendedUrl (e.g. schoology.com) is allowed but redirects through
-    // a blocked domain (powerschool.com), using intendedUrl would loop forever.
-    if (blockedUrl && !(await wouldBeBlocked(blockedUrl))) {
-        window.location.href = intendedUrl || blockedUrl;
-        return;
+    if (blockedUrl) {
+        const stillBlocked = await wouldBeBlocked(blockedUrl);
+        dbg('wouldBeBlocked(' + blockedUrl + ') = ' + stillBlocked);
+        if (!stillBlocked) {
+            dbg('navigating to ' + (intendedUrl || blockedUrl));
+            window.location.href = intendedUrl || blockedUrl;
+            return;
+        }
     }
 
     // ── 7. Listen for config changes (e.g. parent disables extension) ─────
     chrome.storage.onChanged.addListener(async (changes, area) => {
         if (area !== 'local') return;
-
-        // Master toggle off → unblock everything
         if (changes.config?.newValue?.masterEnabled === false) {
             window.location.href = intendedUrl || blockedUrl || 'about:blank';
             return;
         }
-
-        // Allowlist / blocklist change — re-check only if we know the blocked URL
         if (blockedUrl && (changes.config || changes.currentMode)) {
             if (!(await wouldBeBlocked(blockedUrl))) {
                 window.location.href = intendedUrl || blockedUrl;
