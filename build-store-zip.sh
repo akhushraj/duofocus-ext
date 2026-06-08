@@ -1,24 +1,32 @@
 #!/bin/bash
 # Build a clean zip for Chrome Web Store upload.
 # Run from the duofocus folder: ./build-store-zip.sh
-#
-# Before replacing extension icons (icon16/48/128), back them up first, e.g.:
-#   cp icons/icon16.png icons/icon16.png.bak
-#   cp icons/icon48.png icons/icon48.png.bak
-#   cp icons/icon128.png icons/icon128.png.bak
 
 set -e
 cd "$(dirname "$0")"
 OUT=duofocus.zip
 
 rm -f "$OUT"
+
 zip -r "$OUT" . \
   -x "*.DS_Store" \
   -x "_metadata/*" \
   -x ".git/*" \
   -x "*.git*" \
   -x "PUBLISH.md" \
+  -x "STORE_PRIVACY_COPYPASTE.md" \
   -x "build-store-zip.sh" \
-  -x "icons/mascot_old.png"
+  -x "lockdown-setup.sh" \
+  -x "screenshots/*" \
+  -x "icons/mascot_old.png" \
+  -x "icons/mascot_128.png" \
+  -x "duofocus.zip" \
+  -x ".claude/*"
 
-echo "Created $OUT - upload this at https://chrome.google.com/webstore/devconsole"
+echo ""
+echo "✓ Created $OUT"
+echo ""
+echo "Required files in package:"
+zip -sf "$OUT" | grep -v "/$" | sort
+echo ""
+echo "Upload at: https://chrome.google.com/webstore/devconsole"

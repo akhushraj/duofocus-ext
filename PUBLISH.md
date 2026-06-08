@@ -24,7 +24,7 @@ After that you can publish unlimited (free) extensions.
 - `service_worker.js`
 - `utils.js`
 - `options.html`, `options.js`
-- `blocked.html`
+- `blocked.html`, `blocked.js`
 - `styles.css`, `toggle.css`
 - `rules.json`
 - `icons/icon16.png`, `icons/icon48.png`, `icons/icon128.png`

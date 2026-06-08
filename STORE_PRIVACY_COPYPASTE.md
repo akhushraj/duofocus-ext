@@ -45,6 +45,11 @@ Used to store the user's schedule, mode rules (allowlist/blocklist), password ha
 Used to detect the active tab for optional usage time tracking (time spent per site). Only the active tab's URL is used locally; no data is sent externally.
 ```
 
+### webNavigation
+```
+Used to detect redirect chains so the blocked page can show which intermediate domain is preventing an allowed site from loading, and to distinguish user-typed URLs from server-side redirects.
+```
+
 ---
 
 ## 3. Single purpose description
