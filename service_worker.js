@@ -326,10 +326,19 @@ async function applyRules() {
     // Base ID for dynamic rules to avoid conflict with static rules (ID 1)
     const BASE_ID = 1000;
 
+    // Use regexSubstitution so Chrome embeds the blocked URL directly in the
+    // redirect URL as a hash fragment. This is the only reliable way to pass
+    // the blocked URL to blocked.html — onBeforeNavigate does NOT fire for
+    // server-side redirect destinations (Chrome docs: "server side redirects
+    // do not trigger a second onBeforeNavigate event"), so the SW can never
+    // know the redirect destination URL through navigation events alone.
+    const blockedPageBase = chrome.runtime.getURL('/blocked.html');
     const redirectToBlocked = {
         type: 'redirect',
-        redirect: { extensionPath: '/blocked.html' }
+        redirect: { regexSubstitution: `${blockedPageBase}#\\0` }
     };
+    // NOTE: regexFilter must be 'https?://.*' (not '.*') to avoid matching
+    // the chrome-extension:// URL of blocked.html itself, which would loop.
 
     if (type === 'allowlist') {
         // Allow specific domains (priority 3)
@@ -351,7 +360,7 @@ async function applyRules() {
             priority: 2,
             action: redirectToBlocked,
             condition: {
-                urlFilter: '*',
+                regexFilter: 'https?://.*',
                 resourceTypes: ['main_frame']
             }
         });
@@ -371,7 +380,8 @@ async function applyRules() {
                 priority: 3,
                 action: redirectToBlocked,
                 condition: {
-                    urlFilter: `||${domain}`,
+                    regexFilter: 'https?://.*',
+                    requestDomains: [domain],
                     resourceTypes: ['main_frame']
                 }
             });

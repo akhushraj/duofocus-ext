@@ -74,60 +74,65 @@ function showRedirectNotice(intendedUrl, blockedUrl) {
         console.log('[duofocus]', msg);
     }
 
-    dbg('blocked.js started');
+    dbg('blocked.js started, hash=' + location.hash.slice(0,80));
 
-    // ── 1. Ask the service worker (primary source) ────────────────────────
+    // ── 1. Hash (most reliable — Chrome embeds blockedUrl via regexSubstitution) ──
+    // Format A: first load  → blocked.html#https://www.powerschool.com/...  (raw URL)
+    // Format B: after save  → blocked.html#<encoded-intended>|<encoded-blocked>
+    const hash = location.hash;
+    if (hash && hash.length > 1) {
+        const raw = hash.slice(1);
+        const pipeIdx = raw.indexOf('%7C'); // encoded '|'
+        if (pipeIdx !== -1) {
+            // Format B
+            try { intendedUrl = decodeURIComponent(raw.slice(0, pipeIdx)); } catch(e){}
+            try { blockedUrl  = decodeURIComponent(raw.slice(pipeIdx + 3)); } catch(e){}
+        } else if (raw.startsWith('http')) {
+            // Format A — raw URL from regexSubstitution
+            blockedUrl = raw;
+        }
+    }
+    dbg('after hash: intended=' + intendedUrl + ' blocked=' + blockedUrl);
+
+    // ── 2. SW message — use ONLY for intendedUrl and mode/listType ────────
+    // blockedUrl from hash is authoritative; don't let SW override it since
+    // onBeforeNavigate never fires for server-side redirect destinations.
     try {
         const nav = await chrome.runtime.sendMessage({ type: 'getBlockedNav' });
-        dbg('SW message: ' + JSON.stringify(nav));
-        if (nav?.blockedUrl)  blockedUrl  = nav.blockedUrl;
-        if (nav?.intendedUrl) intendedUrl = nav.intendedUrl;
-        if (nav?.mode)        mode        = nav.mode;
-        if (nav?.listType)    listType    = nav.listType;
-    } catch (e) { dbg('SW message error: ' + e); }
+        dbg('SW: ' + JSON.stringify(nav));
+        if (!intendedUrl && nav?.intendedUrl) intendedUrl = nav.intendedUrl;
+        // Only take blockedUrl from SW if hash gave us nothing
+        if (!blockedUrl && nav?.blockedUrl)   blockedUrl  = nav.blockedUrl;
+        if (nav?.mode)     mode     = nav.mode;
+        if (nav?.listType) listType = nav.listType;
+    } catch (e) { dbg('SW error: ' + e); }
 
-    dbg('after SW: intended=' + intendedUrl + ' blocked=' + blockedUrl);
-
-    // ── 2. sessionStorage fallback (survives same-tab refresh) ───────────
-    if (!blockedUrl) {
+    // ── 3. sessionStorage fallback (survives refresh, fills any gaps) ─────
+    if (!blockedUrl || !intendedUrl) {
         try {
             const stored = sessionStorage.getItem(SESSION_KEY);
             if (stored) {
-                const nav = JSON.parse(stored);
-                blockedUrl  = nav.blockedUrl  || null;
-                intendedUrl = nav.intendedUrl || null;
-                mode        = nav.mode        || null;
-                listType    = nav.listType    || null;
-                dbg('sessionStorage: ' + JSON.stringify(nav));
+                const s = JSON.parse(stored);
+                dbg('session: ' + stored.slice(0, 100));
+                if (!blockedUrl)  blockedUrl  = s.blockedUrl  || null;
+                if (!intendedUrl) intendedUrl = s.intendedUrl || null;
+                if (!mode)        mode        = s.mode        || null;
+                if (!listType)    listType    = s.listType    || null;
             }
-        } catch (e) { dbg('sessionStorage error: ' + e); }
-    }
-
-    // ── 3. Local storage fallback (very fresh entries only) ──────────────
-    if (!blockedUrl) {
-        try {
-            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-            if (tabs?.length) {
-                const key  = `blockedNav_${tabs[0].id}`;
-                const data = await chrome.storage.local.get([key]);
-                const nav  = data[key];
-                const age  = nav ? Date.now() - (nav.ts || 0) : -1;
-                dbg('localStorage entry: ' + JSON.stringify(nav) + ' age=' + age + 'ms');
-                if (nav && age < 30_000) {
-                    if (!blockedUrl)  blockedUrl  = nav.blockedUrl;
-                    if (!intendedUrl) intendedUrl = nav.intendedUrl;
-                    if (!mode)        mode        = nav.mode;
-                    if (!listType)    listType    = nav.listType;
-                }
-            }
-        } catch (e) { dbg('localStorage error: ' + e); }
+        } catch (e) {}
     }
 
     dbg('final: intended=' + intendedUrl + ' blocked=' + blockedUrl);
 
-    // ── 4. Persist in sessionStorage for future refreshes ────────────────
+    // ── 4. Persist for future refreshes ──────────────────────────────────
     if (blockedUrl) {
+        // sessionStorage: full data
         try { sessionStorage.setItem(SESSION_KEY, JSON.stringify({ blockedUrl, intendedUrl, mode, listType })); } catch (e) {}
+        // Hash: Format B so refresh can parse both URLs without the SW
+        if (intendedUrl) {
+            const h = encodeURIComponent(intendedUrl) + '%7C' + encodeURIComponent(blockedUrl);
+            history.replaceState(null, '', location.pathname + '#' + h);
+        }
     }
 
     // ── 5. Update UI ──────────────────────────────────────────────────────
