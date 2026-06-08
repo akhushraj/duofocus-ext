@@ -68,17 +68,9 @@ function showRedirectNotice(intendedUrl, blockedUrl) {
     let mode        = null;
     let listType    = null;
 
-    function dbg(msg) {
-        const el = document.getElementById('debugInfo');
-        if (el) el.textContent += msg + '\n';
-        console.log('[duofocus]', msg);
-    }
-
-    dbg('blocked.js started, hash=' + location.hash.slice(0,80));
-
     // ── 1. Hash (most reliable — Chrome embeds blockedUrl via regexSubstitution) ──
     // Format A: first load  → blocked.html#https://www.powerschool.com/...  (raw URL)
-    // Format B: after save  → blocked.html#<encoded-intended>|<encoded-blocked>
+    // Format B: after save  → blocked.html#<encoded-intended>%7C<encoded-blocked>
     const hash = location.hash;
     if (hash && hash.length > 1) {
         const raw = hash.slice(1);
@@ -92,20 +84,17 @@ function showRedirectNotice(intendedUrl, blockedUrl) {
             blockedUrl = raw;
         }
     }
-    dbg('after hash: intended=' + intendedUrl + ' blocked=' + blockedUrl);
 
     // ── 2. SW message — use ONLY for intendedUrl and mode/listType ────────
     // blockedUrl from hash is authoritative; don't let SW override it since
     // onBeforeNavigate never fires for server-side redirect destinations.
     try {
         const nav = await chrome.runtime.sendMessage({ type: 'getBlockedNav' });
-        dbg('SW: ' + JSON.stringify(nav));
         if (!intendedUrl && nav?.intendedUrl) intendedUrl = nav.intendedUrl;
-        // Only take blockedUrl from SW if hash gave us nothing
-        if (!blockedUrl && nav?.blockedUrl)   blockedUrl  = nav.blockedUrl;
+        if (!blockedUrl  && nav?.blockedUrl)  blockedUrl  = nav.blockedUrl;
         if (nav?.mode)     mode     = nav.mode;
         if (nav?.listType) listType = nav.listType;
-    } catch (e) { dbg('SW error: ' + e); }
+    } catch (e) {}
 
     // ── 3. sessionStorage fallback (survives refresh, fills any gaps) ─────
     if (!blockedUrl || !intendedUrl) {
@@ -113,7 +102,6 @@ function showRedirectNotice(intendedUrl, blockedUrl) {
             const stored = sessionStorage.getItem(SESSION_KEY);
             if (stored) {
                 const s = JSON.parse(stored);
-                dbg('session: ' + stored.slice(0, 100));
                 if (!blockedUrl)  blockedUrl  = s.blockedUrl  || null;
                 if (!intendedUrl) intendedUrl = s.intendedUrl || null;
                 if (!mode)        mode        = s.mode        || null;
@@ -121,8 +109,6 @@ function showRedirectNotice(intendedUrl, blockedUrl) {
             }
         } catch (e) {}
     }
-
-    dbg('final: intended=' + intendedUrl + ' blocked=' + blockedUrl);
 
     // ── 4. Persist for future refreshes ──────────────────────────────────
     if (blockedUrl) {
@@ -140,14 +126,9 @@ function showRedirectNotice(intendedUrl, blockedUrl) {
     if (intendedUrl && blockedUrl) showRedirectNotice(intendedUrl, blockedUrl);
 
     // ── 6. Auto-navigate check ────────────────────────────────────────────
-    if (blockedUrl) {
-        const stillBlocked = await wouldBeBlocked(blockedUrl);
-        dbg('wouldBeBlocked(' + blockedUrl + ') = ' + stillBlocked);
-        if (!stillBlocked) {
-            dbg('navigating to ' + (intendedUrl || blockedUrl));
-            window.location.href = intendedUrl || blockedUrl;
-            return;
-        }
+    if (blockedUrl && !(await wouldBeBlocked(blockedUrl))) {
+        window.location.href = intendedUrl || blockedUrl;
+        return;
     }
 
     // ── 7. Listen for config changes (e.g. parent disables extension) ─────
