@@ -26,6 +26,14 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === 'checkTime') {
         updateBlockingRules();
         flushActiveSession(); // persist time spent since last tick
+        syncToCloud();
+    }
+});
+
+chrome.runtime.onMessage.addListener((msg) => {
+    if (msg.type === 'cloudSync') syncToCloud();
+    if (msg.type === 'getBlockedNav') {
+        // handled elsewhere
     }
 });
 
@@ -410,4 +418,54 @@ async function applyRules() {
     });
 
     console.log(`Applied ${newRules.length} rules for mode ${currentMode} (${type}).`);
+}
+
+// ── Cloud Sync ────────────────────────────────────────────────────────────────
+
+const CLOUD_API = 'https://duofocus-server.vercel.app';
+
+async function syncToCloud() {
+    try {
+        const { cloudConfig, usageStats } = await chrome.storage.local.get(['cloudConfig', 'usageStats']);
+        if (!cloudConfig || !cloudConfig.deviceToken) return; // not paired
+
+        const { deviceToken, deviceId, uid } = cloudConfig;
+        const headers = {
+            'Content-Type': 'application/json',
+            'X-Device-Token': deviceToken,
+            'X-Device-Id': deviceId,
+            'X-Uid': uid
+        };
+
+        // Sync usage stats — send each date's domain data
+        if (usageStats && Object.keys(usageStats).length > 0) {
+            for (const [date, domains] of Object.entries(usageStats)) {
+                if (!domains || Object.keys(domains).length === 0) continue;
+                await fetch(`${CLOUD_API}/api/usage`, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ date, domains })
+                });
+            }
+        }
+
+        // Pull remote config — apply if newer than local
+        const configRes = await fetch(`${CLOUD_API}/api/config`, { headers });
+        if (configRes.ok) {
+            const { config: remoteConfig } = await configRes.json();
+            if (remoteConfig && remoteConfig.updatedAt) {
+                const { config: localConfig } = await chrome.storage.local.get(['config']);
+                const localUpdatedAt = localConfig && localConfig.updatedAt ? localConfig.updatedAt : 0;
+                if (remoteConfig.updatedAt > localUpdatedAt) {
+                    // Remote is newer — apply it (strip server-only fields)
+                    const { updatedAt, ...rest } = remoteConfig;
+                    await chrome.storage.local.set({ config: { ...rest, updatedAt } });
+                    updateBlockingRules();
+                    console.log('Applied remote config update.');
+                }
+            }
+        }
+    } catch (e) {
+        console.warn('Cloud sync failed:', e.message);
+    }
 }

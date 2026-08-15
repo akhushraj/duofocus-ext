@@ -30,7 +30,15 @@ const ELEMENTS = {
     usageDateSingleWrap: document.getElementById('usageDateSingleWrap'),
     usageDateRangeWrap: document.getElementById('usageDateRangeWrap'),
     usageDateStart: document.getElementById('usageDateStart'),
-    usageDateEnd: document.getElementById('usageDateEnd')
+    usageDateEnd: document.getElementById('usageDateEnd'),
+    cloudConnected: document.getElementById('cloudConnected'),
+    cloudNotConnected: document.getElementById('cloudNotConnected'),
+    cloudDeviceName: document.getElementById('cloudDeviceName'),
+    cloudDeviceNameInput: document.getElementById('cloudDeviceNameInput'),
+    cloudPairingCode: document.getElementById('cloudPairingCode'),
+    cloudConnectBtn: document.getElementById('cloudConnectBtn'),
+    cloudDisconnectBtn: document.getElementById('cloudDisconnectBtn'),
+    cloudError: document.getElementById('cloudError')
 };
 
 document.addEventListener('DOMContentLoaded', init);
@@ -68,6 +76,11 @@ async function init() {
     ELEMENTS.changePasswordBtn.addEventListener('click', handleChangePassword);
     ELEMENTS.addScheduleBtn.addEventListener('click', addScheduleItem);
     ELEMENTS.masterToggle.addEventListener('change', handleMasterToggle);
+    ELEMENTS.cloudConnectBtn.addEventListener('click', handleCloudConnect);
+    ELEMENTS.cloudDisconnectBtn.addEventListener('click', handleCloudDisconnect);
+    ELEMENTS.cloudPairingCode.addEventListener('input', (e) => {
+        e.target.value = e.target.value.toUpperCase();
+    });
     
     // Allow Enter key to unlock
     ELEMENTS.passwordInput.addEventListener('keypress', (e) => {
@@ -350,6 +363,7 @@ function showSettings() {
 
     renderSchedule();
     loadModeRules();
+    loadCloudStatus();
 }
 
 async function handleMasterToggle(e) {
@@ -466,4 +480,82 @@ async function handleChangePassword() {
         await saveConfig();
         location.reload();
     }
+}
+
+// ── Cloud Sync ────────────────────────────────────────────────────────────────
+
+const CLOUD_API = 'https://duofocus-server.vercel.app';
+
+async function loadCloudStatus() {
+    const { cloudConfig } = await chrome.storage.local.get(['cloudConfig']);
+    if (cloudConfig && cloudConfig.deviceToken) {
+        ELEMENTS.cloudConnected.style.display = 'block';
+        ELEMENTS.cloudNotConnected.style.display = 'none';
+        ELEMENTS.cloudDeviceName.textContent = `Device: ${cloudConfig.deviceName}`;
+    } else {
+        ELEMENTS.cloudConnected.style.display = 'none';
+        ELEMENTS.cloudNotConnected.style.display = 'block';
+    }
+}
+
+async function handleCloudConnect() {
+    const code = ELEMENTS.cloudPairingCode.value.trim().toUpperCase();
+    const deviceName = ELEMENTS.cloudDeviceNameInput.value.trim();
+
+    if (!code || code.length < 6) {
+        showCloudError('Please enter the 6-character pairing code.');
+        return;
+    }
+    if (!deviceName) {
+        showCloudError('Please enter a device name.');
+        return;
+    }
+
+    ELEMENTS.cloudConnectBtn.textContent = 'Connecting…';
+    ELEMENTS.cloudConnectBtn.disabled = true;
+    ELEMENTS.cloudError.style.display = 'none';
+
+    try {
+        const res = await fetch(`${CLOUD_API}/api/pair/redeem`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+            showCloudError(data.error || 'Invalid or expired code.');
+            return;
+        }
+
+        await chrome.storage.local.set({
+            cloudConfig: {
+                deviceToken: data.deviceToken,
+                deviceId: data.deviceId,
+                uid: data.uid,
+                deviceName
+            }
+        });
+
+        await loadCloudStatus();
+        // Trigger immediate sync
+        chrome.runtime.sendMessage({ type: 'cloudSync' });
+
+    } catch (e) {
+        showCloudError('Could not connect. Check your internet connection.');
+    } finally {
+        ELEMENTS.cloudConnectBtn.textContent = 'Connect';
+        ELEMENTS.cloudConnectBtn.disabled = false;
+    }
+}
+
+async function handleCloudDisconnect() {
+    if (!confirm('Disconnect this device from cloud sync? Local data is kept.')) return;
+    await chrome.storage.local.remove(['cloudConfig']);
+    await loadCloudStatus();
+}
+
+function showCloudError(msg) {
+    ELEMENTS.cloudError.textContent = msg;
+    ELEMENTS.cloudError.style.display = 'block';
 }

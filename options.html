@@ -47,6 +47,9 @@
                 <button class="nav-item" data-section="security">
                     <span>Security</span>
                 </button>
+                <button class="nav-item" data-section="cloud">
+                    <span>Cloud</span>
+                </button>
             </nav>
         </aside>
 
@@ -153,6 +156,58 @@
                     </div>
 
                     <button id="saveRulesBtn">Save Rules for Mode</button>
+                </div>
+            </section>
+
+            <!-- Cloud Section -->
+            <section id="cloud-section" class="content-section">
+                <h2>Cloud Sync</h2>
+                <div class="section-content">
+                    <!-- Connected state -->
+                    <div id="cloudConnected" style="display:none;">
+                        <div class="security-card">
+                            <div class="security-card-header">
+                                <div>
+                                    <span class="security-title">✅ Connected</span>
+                                    <span class="security-desc" id="cloudDeviceName">This device is syncing to the cloud.</span>
+                                </div>
+                                <button id="cloudDisconnectBtn" class="danger">Disconnect</button>
+                            </div>
+                        </div>
+                        <p style="color: var(--text-secondary); font-size: 0.85rem; margin-top: 1rem;">Usage data and settings are syncing to <strong>duofocus-server.vercel.app</strong>. View them from any browser by logging in with your Google account.</p>
+                    </div>
+
+                    <!-- Not connected state -->
+                    <div id="cloudNotConnected">
+                        <div class="security-card">
+                            <div class="security-card-header">
+                                <div>
+                                    <span class="security-title">Not connected</span>
+                                    <span class="security-desc">Link this device to your cloud account to sync usage and manage settings remotely.</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div style="margin-top: 1.25rem;">
+                            <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 1rem;">
+                                1. Open <strong>duofocus-server.vercel.app</strong> on your phone or computer<br>
+                                2. Sign in with Google → click <strong>"Link a device"</strong><br>
+                                3. Enter the device name and click <strong>"Generate code"</strong><br>
+                                4. Paste the code below:
+                            </p>
+                            <div style="display: flex; gap: 0.75rem; align-items: flex-end; flex-wrap: wrap;">
+                                <div>
+                                    <label class="input-label">Device name (for your reference)</label>
+                                    <input type="text" id="cloudDeviceNameInput" placeholder="e.g. Rohan's MacBook" style="width: 220px;">
+                                </div>
+                                <div>
+                                    <label class="input-label">Pairing code</label>
+                                    <input type="text" id="cloudPairingCode" placeholder="ABC123" maxlength="6" style="width: 120px; text-transform: uppercase; letter-spacing: 0.15em; font-weight: 600;">
+                                </div>
+                                <button id="cloudConnectBtn">Connect</button>
+                            </div>
+                            <p id="cloudError" class="error" style="display:none; margin-top: 0.75rem;"></p>
+                        </div>
+                    </div>
                 </div>
             </section>
 
