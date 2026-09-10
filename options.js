@@ -34,7 +34,6 @@ const ELEMENTS = {
     cloudConnected: document.getElementById('cloudConnected'),
     cloudNotConnected: document.getElementById('cloudNotConnected'),
     cloudDeviceName: document.getElementById('cloudDeviceName'),
-    cloudDeviceNameInput: document.getElementById('cloudDeviceNameInput'),
     cloudPairingCode: document.getElementById('cloudPairingCode'),
     cloudConnectBtn: document.getElementById('cloudConnectBtn'),
     cloudDisconnectBtn: document.getElementById('cloudDisconnectBtn'),
@@ -500,14 +499,9 @@ async function loadCloudStatus() {
 
 async function handleCloudConnect() {
     const code = ELEMENTS.cloudPairingCode.value.trim().toUpperCase();
-    const deviceName = ELEMENTS.cloudDeviceNameInput.value.trim();
 
     if (!code || code.length < 6) {
         showCloudError('Please enter the 6-character pairing code.');
-        return;
-    }
-    if (!deviceName) {
-        showCloudError('Please enter a device name.');
         return;
     }
 
@@ -533,7 +527,7 @@ async function handleCloudConnect() {
                 deviceToken: data.deviceToken,
                 deviceId: data.deviceId,
                 uid: data.uid,
-                deviceName
+                deviceName: data.deviceName  // name comes from the dashboard, not entered here
             }
         });
 

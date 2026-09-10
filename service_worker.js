@@ -437,10 +437,19 @@ async function syncToCloud() {
             'X-Uid': uid
         };
 
-        // Sync usage stats — send each date's domain data
+        // Sync usage stats — usageStats is { domain: { days: { date: { totalSeconds } } } }
+        // Reshape to { date: { domain: seconds } } before sending
         if (usageStats && Object.keys(usageStats).length > 0) {
-            for (const [date, domains] of Object.entries(usageStats)) {
-                if (!domains || Object.keys(domains).length === 0) continue;
+            const byDate = {};
+            for (const [domain, domainData] of Object.entries(usageStats)) {
+                if (!domainData.days) continue;
+                for (const [date, dayData] of Object.entries(domainData.days)) {
+                    if (!byDate[date]) byDate[date] = {};
+                    byDate[date][domain] = (byDate[date][domain] || 0) + (dayData.totalSeconds || 0);
+                }
+            }
+            for (const [date, domains] of Object.entries(byDate)) {
+                if (Object.keys(domains).length === 0) continue;
                 await fetch(`${CLOUD_API}/api/usage`, {
                     method: 'POST',
                     headers,
