@@ -107,10 +107,9 @@ async function stopTracking() {
 async function startTracking(tabId, url) {
     await stopTracking();
 
-    const isEnabled = await checkExtensionEnabled();
     const focusData = await chrome.storage.local.get(['windowFocused']);
     const focused   = focusData.windowFocused !== false; // default true
-    if (!isEnabled || !focused) return;
+    if (!focused) return; // tracking is independent of master switch; only pause when window is unfocused
 
     const domain = getDomain(url);
     if (!domain) return;
@@ -185,12 +184,7 @@ chrome.windows.onFocusChanged.addListener(async (windowId) => {
     }
 });
 
-// Extension toggled off → stop tracking
-chrome.storage.onChanged.addListener(async (changes, area) => {
-    if (area === 'local' && changes.config) {
-        if (!(await checkExtensionEnabled())) await stopTracking();
-    }
-});
+// Note: toggling the master switch does NOT stop tracking — usage is always recorded.
 // ============================================
 // END TIME TRACKING
 // ============================================
