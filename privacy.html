@@ -20,34 +20,69 @@
         th, td { border: 1px solid #ddd; padding: 0.6rem 0.9rem; text-align: left; }
         th { background: #f5f5f5; }
         .highlight { background: #f0f7ff; border-left: 4px solid #4f46e5; padding: 0.75rem 1rem; border-radius: 4px; margin: 1.5rem 0; }
+        .warning { background: #fffbeb; border-left: 4px solid #f59e0b; padding: 0.75rem 1rem; border-radius: 4px; margin: 1.5rem 0; }
     </style>
 </head>
 <body>
     <h1>Duofocus — Privacy Policy</h1>
-    <p class="updated">Last updated: June 2026</p>
+    <p class="updated">Last updated: September 2026</p>
 
     <div class="highlight">
-        <strong>Short version:</strong> Duofocus stores everything locally on your device. No data is collected, transmitted, or shared with anyone — including the developer.
+        <strong>Short version:</strong> By default, Duofocus stores everything locally on your device and sends nothing anywhere. An optional Cloud Sync feature (off by default) lets you view usage data remotely — it only activates when you explicitly link a device to an account.
     </div>
 
     <h2>What Duofocus does</h2>
-    <p>Duofocus is a Chrome extension that blocks or allows websites on a time-based schedule (Study, Free, Sleep modes). Settings are password-protected and all data stays on the device it is installed on.</p>
+    <p>Duofocus is a Chrome extension that blocks or allows websites on a time-based schedule (Study, Free, Sleep modes). Settings are password-protected. By default, all data stays on the device.</p>
+    <p>An optional Cloud Sync feature allows a parent or user to link the extension to an account at <strong>duofocus-server.vercel.app</strong> and view usage data remotely from any browser. Cloud Sync is disabled until you explicitly activate it using a pairing code.</p>
 
-    <h2>Data stored — local only</h2>
+    <h2>Data stored locally (always)</h2>
     <table>
         <tr><th>Data</th><th>Purpose</th><th>Stored where</th></tr>
         <tr><td>Schedule &amp; mode rules</td><td>Controls which sites are blocked at which times</td><td><code>chrome.storage.local</code> on your device</td></tr>
         <tr><td>Password hash (salt + SHA-256)</td><td>Protects settings from being changed without a password</td><td><code>chrome.storage.local</code> on your device</td></tr>
-        <tr><td>Usage statistics</td><td>Optional time-per-site tracking shown in the settings panel</td><td><code>chrome.storage.local</code> on your device</td></tr>
+        <tr><td>Usage statistics</td><td>Time-per-site tracking shown in the settings panel</td><td><code>chrome.storage.local</code> on your device</td></tr>
     </table>
 
-    <h2>What is NOT collected</h2>
+    <h2>Cloud Sync (optional, off by default)</h2>
+
+    <div class="warning">
+        <strong>Cloud Sync is opt-in.</strong> Nothing is sent to any server unless you link the extension to an account using a pairing code in the Cloud tab of the extension settings.
+    </div>
+
+    <p>When Cloud Sync is enabled, the following data is sent to Duofocus servers approximately once per minute:</p>
+    <table>
+        <tr><th>Data</th><th>Purpose</th><th>Stored where</th></tr>
+        <tr><td>Domain names and time spent (seconds per domain per day)</td><td>Lets the parent dashboard show usage history</td><td>Google Firebase Firestore, linked to your account</td></tr>
+        <tr><td>Blocking schedule and mode rules</td><td>Allows remote schedule management from the dashboard</td><td>Google Firebase Firestore, linked to your account</td></tr>
+        <tr><td>Device name (set by account holder)</td><td>Identifies this device in the dashboard</td><td>Google Firebase Firestore</td></tr>
+        <tr><td>A random device token</td><td>Authenticates this device to the API without requiring a password</td><td><code>chrome.storage.local</code> on your device</td></tr>
+    </table>
+
+    <p><strong>What is NOT sent even with Cloud Sync on:</strong></p>
     <ul>
-        <li>No browsing history is sent anywhere</li>
-        <li>No personal information is collected</li>
-        <li>No analytics or telemetry</li>
-        <li>No external servers are used — ever</li>
-        <li>The developer has no access to any data</li>
+        <li>Full URLs or page titles — only the domain name (e.g. <code>youtube.com</code>)</li>
+        <li>The contents of any page you visit</li>
+        <li>Passwords or password hashes</li>
+        <li>Any personal information entered on websites</li>
+    </ul>
+
+    <p><strong>Third-party services used for Cloud Sync:</strong></p>
+    <ul>
+        <li><strong>Google Firebase / Firestore</strong> — data storage. Subject to <a href="https://firebase.google.com/support/privacy" target="_blank">Google's privacy policy</a>.</li>
+        <li><strong>Vercel</strong> — API hosting. Subject to <a href="https://vercel.com/legal/privacy-policy" target="_blank">Vercel's privacy policy</a>.</li>
+    </ul>
+
+    <p><strong>How to disable Cloud Sync:</strong> Open the extension settings → Cloud tab → click <em>Disconnect</em>. All future syncing stops immediately. To delete your stored data, contact <a href="mailto:abhinav@starmesh.ai">abhinav@starmesh.ai</a>.</p>
+
+    <h2>Account data (Cloud Sync accounts)</h2>
+    <p>If you create an account at duofocus-server.vercel.app (required to use Cloud Sync), your Google account email address is stored via Firebase Authentication solely to identify your account. It is not shared, sold, or used for marketing.</p>
+
+    <h2>What is never collected</h2>
+    <ul>
+        <li>No analytics or telemetry of any kind</li>
+        <li>No advertising identifiers</li>
+        <li>No data is sold to third parties</li>
+        <li>The developer does not access individual usage data</li>
     </ul>
 
     <h2>Permissions used</h2>
@@ -56,18 +91,18 @@
         <tr><td>storage</td><td>Save schedule, rules, password hash, and usage stats locally</td></tr>
         <tr><td>declarativeNetRequest</td><td>Block or allow sites according to the schedule — all rules run locally</td></tr>
         <tr><td>alarms</td><td>Check the schedule every minute to switch modes at the right time</td></tr>
-        <tr><td>tabs</td><td>Detect the active tab for optional usage time tracking</td></tr>
-        <tr><td>webNavigation</td><td>Detect redirect chains so the blocked page can show which domain needs to be added to the allowlist</td></tr>
+        <tr><td>tabs</td><td>Detect the active tab for usage time tracking</td></tr>
+        <tr><td>webNavigation</td><td>Detect redirect chains so the blocked page can show which domain triggered the block</td></tr>
         <tr><td>&lt;all_urls&gt;</td><td>Required to evaluate and block/allow any website based on the schedule</td></tr>
     </table>
 
     <h2>Children's privacy</h2>
-    <p>Duofocus is designed to help parents manage screen time for children. No data about children is collected or transmitted.</p>
+    <p>Duofocus is designed to help parents manage screen time for children. The extension does not knowingly collect data from children directly. When Cloud Sync is used for parental monitoring, the account is held and managed by the parent, not the child.</p>
 
     <h2>Changes to this policy</h2>
     <p>If this policy changes, the updated version will be posted at this URL with a new "Last updated" date.</p>
 
     <h2>Contact</h2>
-    <p>Questions? Email <a href="mailto:abhinav@starmesh.ai">abhinav@starmesh.ai</a></p>
+    <p>Questions or data deletion requests? Email <a href="mailto:abhinav@starmesh.ai">abhinav@starmesh.ai</a></p>
 </body>
 </html>
