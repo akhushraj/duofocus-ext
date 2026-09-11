@@ -2,7 +2,7 @@
     "manifest_version": 3,
     "name": "Duofocus",
     "version": "1.2.0",
-    "description": "A local-only, time-based site blocker to help you focus.",
+    "description": "Schedule-based site blocker with usage tracking and cloud sync — for focused work or parental monitoring.",
     "permissions": [
         "storage",
         "declarativeNetRequest",
